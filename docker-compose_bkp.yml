@@ -1,0 +1,53 @@
+services:
+  db:
+    image: postgres:18
+    container_name: docker-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: Troca@123
+      POSTGRES_DB: investimentos
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./docker/initdb:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d investimentos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - app-network
+
+  app:
+    image: node:22-bookworm
+    container_name: docker-app
+    restart: unless-stopped
+    working_dir: /app
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - app_node_modules:/app/node_modules
+    environment:
+      DATABASE_URL: postgresql://appsis:Troca@123@docker-db:5432/investimentos?schema=public
+      CHOKIDAR_USEPOLLING: "true"
+    command: sh -c "npm install && npm run dev -- --hostname 0.0.0.0 --port 3000"
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+    external: true
+    name: e516aba4bda627c66c9cdc25d3326200db60d406b8e93598ca60664e580ac910
+
+  app_node_modules:
+
+networks:
+  app-network:
+    name: network
+    external: true

@@ -1,0 +1,14 @@
+export const ASSET_CLASS = {
+  DOMESTIC_STOCK: 'DOMESTIC_STOCK',
+  STOCK: 'STOCK',
+  ETF: 'ETF',
+  INTERNATIONAL_ETF: 'INTERNATIONAL_ETF',
+  FII: 'FII',
+  BDR: 'BDR',
+  CRYPTO: 'CRYPTO',
+  FIXED_INCOME: 'FIXED_INCOME',
+  TREASURY: 'TREASURY',
+  CASH: 'CASH',
+} as const
+
+export type AssetClassCode = typeof ASSET_CLASS[keyof typeof ASSET_CLASS]

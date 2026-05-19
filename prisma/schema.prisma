@@ -1,0 +1,360 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Tabela de referência para classificação macro dos ativos.
+///
+/// Códigos esperados em `code` após a migration:
+/// - DOMESTIC_STOCK: ação nacional
+/// - STOCK: ação internacional individual
+/// - ETF: ETF nacional
+/// - INTERNATIONAL_ETF: ETF internacional
+/// - FII: fundo imobiliário
+/// - BDR: Brazilian Depositary Receipt
+/// - CRYPTO: criptoativo
+/// - FIXED_INCOME: renda fixa privada/bancária
+/// - TREASURY: Tesouro Direto
+/// - CASH: caixa / saldo parado
+///
+/// Observação:
+/// - EXTERIOR não deve mais existir.
+/// - STOCK não representa mais ação nacional.
+/// - Ação nacional deve ser sempre DOMESTIC_STOCK.
+model AssetClass {
+  id                String                   @id @default(cuid())
+  /// Código estável usado pela aplicação para regras, filtros e relatórios.
+  /// Deve seguir exatamente um dos valores documentados acima.
+  code              String                   @unique @db.VarChar(50)
+  /// Nome amigável exibido na interface.
+  name              String                   @unique @db.VarChar(100)
+  targetPercentage  Decimal?                 @db.Decimal(7, 4)
+  description       String?
+  displayOrder      Int                      @default(0)
+  isActive          Boolean                  @default(true)
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  allocationTargets AllocationTarget[]
+  assets            Asset[]
+  snapshotItems     PortfolioClassSnapshot[]
+
+  @@index([displayOrder])
+}
+
+model Institution {
+  id          String    @id @default(cuid())
+  name        String    @unique @db.VarChar(120)
+  code        String?   @unique @db.VarChar(50)
+  countryCode String?   @db.VarChar(2)
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  accounts    Account[]
+}
+
+model Account {
+  id                      String                   @id @default(cuid())
+  name                    String                   @db.VarChar(120)
+  type                    AccountType
+  institutionId           String?
+  currencyCode            String                   @default("BRL") @db.VarChar(10)
+  isActive                Boolean                  @default(true)
+  notes                   String?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  institution             Institution?             @relation(fields: [institutionId], references: [id])
+  incomeEvents            IncomeEvent[]
+  portfolioAssetSnapshots PortfolioAssetSnapshot[]
+  portfolioItems          PortfolioItem[]
+  transactions            Transaction[]
+
+  @@unique([name, institutionId])
+  @@index([type])
+  @@index([institutionId])
+}
+
+model Asset {
+  id             String                   @id @default(cuid())
+  ticker         String                   @unique @db.VarChar(30)
+  name           String                   @db.VarChar(150)
+  normalizedName String?                  @db.VarChar(150)
+
+  /// Tipo instrumental/técnico do ativo.
+  ///
+  /// Exemplos:
+  /// - PETR4 -> STOCK
+  /// - VOO -> ETF
+  /// - HGLG11 -> FII
+  ///
+  /// Importante:
+  /// `assetType` não substitui `assetClass`.
+  /// A separação nacional vs internacional fica em `AssetClass.code`.
+  assetType      AssetType
+
+  /// FK para a tabela AssetClass.
+  ///
+  /// Convenção esperada após a migration:
+  /// - ação nacional -> AssetClass.code = DOMESTIC_STOCK
+  /// - ação internacional -> AssetClass.code = STOCK
+  /// - ETF nacional -> AssetClass.code = ETF
+  /// - ETF internacional -> AssetClass.code = INTERNATIONAL_ETF
+  assetClassId   String
+
+  isin           String?                  @unique @db.VarChar(20)
+  currencyCode   String                   @default("BRL") @db.VarChar(10)
+  exchange       String?                  @db.VarChar(50)
+  sector         String?                  @db.VarChar(100)
+  segment        String?                  @db.VarChar(100)
+  issuer         String?                  @db.VarChar(150)
+  isActive       Boolean                  @default(true)
+  notes          String?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  assetClass     AssetClass               @relation(fields: [assetClassId], references: [id])
+  incomeEvents   IncomeEvent[]
+  snapshotItems  PortfolioAssetSnapshot[]
+  portfolioItems PortfolioItem[]
+  priceHistories PriceHistory[]
+  transactions   Transaction[]
+
+  @@index([assetClassId])
+  @@index([assetType])
+  @@index([name])
+}
+
+model Transaction {
+  id               String            @id @default(cuid())
+  accountId        String
+  assetId          String?
+  type             TransactionType
+  status           TransactionStatus @default(POSTED)
+  tradeDate        DateTime          @db.Date
+  settlementDate   DateTime?         @db.Date
+  quantity         Decimal?          @db.Decimal(20, 8)
+  unitPrice        Decimal?          @db.Decimal(20, 8)
+  grossAmount      Decimal           @db.Decimal(20, 2)
+  fees             Decimal           @default(0) @db.Decimal(20, 2)
+  taxes            Decimal           @default(0) @db.Decimal(20, 2)
+  netAmount        Decimal?          @db.Decimal(20, 2)
+  currencyCode     String            @default("BRL") @db.VarChar(10)
+  exchangeRate     Decimal?          @db.Decimal(20, 8)
+  externalId       String?           @db.VarChar(100)
+  brokerNoteNumber String?           @db.VarChar(100)
+  description      String?
+  importedFrom     String?           @db.VarChar(100)
+  importedRowRef   String?           @db.VarChar(100)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  account          Account           @relation(fields: [accountId], references: [id])
+  asset            Asset?            @relation(fields: [assetId], references: [id])
+
+  @@unique([accountId, externalId], map: "transaction_account_externalId_unique")
+  @@index([accountId, tradeDate])
+  @@index([assetId, tradeDate])
+  @@index([type, tradeDate])
+}
+
+model IncomeEvent {
+  id            String     @id @default(cuid())
+  assetId       String
+  accountId     String?
+  type          IncomeType
+  exDate        DateTime?  @db.Date
+  paymentDate   DateTime   @db.Date
+  quantityBase  Decimal?   @db.Decimal(20, 8)
+  amountPerUnit Decimal?   @db.Decimal(20, 8)
+  grossAmount   Decimal    @db.Decimal(20, 2)
+  taxes         Decimal    @default(0) @db.Decimal(20, 2)
+  netAmount     Decimal?   @db.Decimal(20, 2)
+  currencyCode  String     @default("BRL") @db.VarChar(10)
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  account       Account?   @relation(fields: [accountId], references: [id])
+  asset         Asset      @relation(fields: [assetId], references: [id])
+
+  @@index([assetId, paymentDate])
+  @@index([accountId, paymentDate])
+  @@index([type, paymentDate])
+}
+
+model PriceHistory {
+  id            String   @id @default(cuid())
+  assetId       String
+  priceDate     DateTime @db.Date
+  openPrice     Decimal? @db.Decimal(20, 8)
+  highPrice     Decimal? @db.Decimal(20, 8)
+  lowPrice      Decimal? @db.Decimal(20, 8)
+  closePrice    Decimal  @db.Decimal(20, 8)
+  adjustedClose Decimal? @db.Decimal(20, 8)
+  currencyCode  String   @default("BRL") @db.VarChar(10)
+  source        String?  @db.VarChar(50)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  asset         Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, priceDate])
+  @@index([priceDate])
+}
+
+model AllocationTarget {
+  id               String     @id @default(cuid())
+  assetClassId     String
+  targetPercentage Decimal    @db.Decimal(7, 4)
+  effectiveFrom    DateTime   @db.Date
+  effectiveTo      DateTime?  @db.Date
+  notes            String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  assetClass       AssetClass @relation(fields: [assetClassId], references: [id], onDelete: Cascade)
+
+  @@unique([assetClassId, effectiveFrom])
+  @@index([effectiveFrom, effectiveTo])
+}
+
+model PortfolioSnapshot {
+  id                 String                   @id @default(cuid())
+  referenceDate      DateTime                 @db.Date
+  period             SnapshotPeriod           @default(MONTHLY)
+  totalInvested      Decimal                  @default(0) @db.Decimal(20, 2)
+  totalMarketValue   Decimal                  @default(0) @db.Decimal(20, 2)
+  totalProfitLoss    Decimal                  @default(0) @db.Decimal(20, 2)
+  totalProfitLossPct Decimal?                 @db.Decimal(9, 6)
+  totalIncome        Decimal                  @default(0) @db.Decimal(20, 2)
+  cashBalance        Decimal                  @default(0) @db.Decimal(20, 2)
+  notes              String?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  assetSnapshots     PortfolioAssetSnapshot[]
+  classSnapshots     PortfolioClassSnapshot[]
+
+  @@unique([referenceDate, period])
+  @@index([referenceDate])
+}
+
+model PortfolioClassSnapshot {
+  id                    String            @id @default(cuid())
+  snapshotId            String
+  assetClassId          String
+  investedAmount        Decimal           @default(0) @db.Decimal(20, 2)
+  marketValue           Decimal           @default(0) @db.Decimal(20, 2)
+  profitLoss            Decimal           @default(0) @db.Decimal(20, 2)
+  currentPercentage     Decimal?          @db.Decimal(9, 6)
+  targetPercentage      Decimal?          @db.Decimal(9, 6)
+  rebalanceDifference   Decimal?          @db.Decimal(20, 2)
+  suggestedContribution Decimal?          @db.Decimal(20, 2)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  assetClass            AssetClass        @relation(fields: [assetClassId], references: [id])
+  snapshot              PortfolioSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, assetClassId])
+  @@index([assetClassId])
+}
+
+model PortfolioAssetSnapshot {
+  id             String            @id @default(cuid())
+  snapshotId     String
+  assetId        String
+  accountId      String?
+  quantity       Decimal           @default(0) @db.Decimal(20, 8)
+  averagePrice   Decimal?          @db.Decimal(20, 8)
+  marketPrice    Decimal?          @db.Decimal(20, 8)
+  investedAmount Decimal           @default(0) @db.Decimal(20, 2)
+  marketValue    Decimal           @default(0) @db.Decimal(20, 2)
+  profitLoss     Decimal           @default(0) @db.Decimal(20, 2)
+  profitLossPct  Decimal?          @db.Decimal(9, 6)
+  incomeReceived Decimal?          @db.Decimal(20, 2)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  account        Account?          @relation(fields: [accountId], references: [id])
+  asset          Asset             @relation(fields: [assetId], references: [id])
+  snapshot       PortfolioSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, assetId, accountId])
+  @@index([assetId])
+  @@index([accountId])
+}
+
+model PortfolioItem {
+  id             String    @id @default(cuid())
+  assetId        String
+  accountId      String
+  quantity       Decimal   @default(0) @db.Decimal(20, 8)
+  averagePrice   Decimal?  @db.Decimal(20, 8)
+  investedAmount Decimal   @default(0) @db.Decimal(20, 2)
+  marketPrice    Decimal?  @db.Decimal(20, 8)
+  marketValue    Decimal   @default(0) @db.Decimal(20, 2)
+  unrealizedPnL  Decimal   @default(0) @db.Decimal(20, 2)
+  realizedPnL    Decimal   @default(0) @db.Decimal(20, 2)
+  lastUpdatedAt  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  account        Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  asset          Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, accountId])
+  @@index([accountId])
+}
+
+enum AssetType {
+  STOCK
+  FII
+  ETF
+  BDR
+  CRYPTO
+  BOND
+  FUND
+  CASH
+  OTHER
+}
+
+enum AccountType {
+  BROKERAGE
+  BANK
+  EXCHANGE
+  WALLET
+  OTHER
+}
+
+enum TransactionType {
+  BUY
+  SELL
+  DEPOSIT
+  WITHDRAW
+  FEE
+  TAX
+  TRANSFER_IN
+  TRANSFER_OUT
+  SPLIT
+  REVERSE_SPLIT
+  BONUS
+  AMORTIZATION
+  OTHER
+}
+
+enum TransactionStatus {
+  POSTED
+  PENDING
+  CANCELED
+}
+
+enum IncomeType {
+  DIVIDEND
+  JCP
+  FII_INCOME
+  COUPON
+  INTEREST
+  AMORTIZATION
+  OTHER
+}
+
+enum SnapshotPeriod {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
