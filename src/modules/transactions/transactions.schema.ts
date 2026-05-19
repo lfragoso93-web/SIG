@@ -21,7 +21,7 @@ const transactionTypeEnum = z.enum([
 const transactionStatusEnum = z.enum(["POSTED", "PENDING", "CANCELED"]);
 
 const transactionBaseSchema = z.object({
-  accountId: z.string().min(1),
+  accountId: z.string().min(1).optional().nullable(),
   assetId: z.string().min(1).optional().nullable(),
   type: transactionTypeEnum,
   status: transactionStatusEnum.optional(),

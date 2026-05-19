@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../core/prisma/prisma.service";
 
 type CreateTransactionInput = {
-  accountId: string;
+  accountId?: string | null;
   assetId?: string | null;
   type: string;
   status?: string;
@@ -32,6 +32,7 @@ const toDecimal = (value?: string | number | null) => {
 
 class TransactionsService {
   async create(data: CreateTransactionInput) {
+  if (data.accountId) {
     const account = await prisma.account.findUnique({
       where: { id: data.accountId },
     });
@@ -39,45 +40,50 @@ class TransactionsService {
     if (!account) {
       throw new Error("Conta não encontrada.");
     }
-
-    if (data.assetId) {
-      const asset = await prisma.asset.findUnique({
-        where: { id: data.assetId },
-      });
-
-      if (!asset) {
-        throw new Error("Ativo não encontrado.");
-      }
-    }
-
-    return prisma.transaction.create({
-      data: {
-        accountId: data.accountId,
-        assetId: data.assetId ?? null,
-        type: data.type as any,
-        status: (data.status as any) ?? "POSTED",
-        tradeDate: data.tradeDate,
-        settlementDate: data.settlementDate ?? null,
-        quantity: toDecimal(data.quantity),
-        unitPrice: toDecimal(data.unitPrice),
-        grossAmount: new Prisma.Decimal(data.grossAmount),
-        fees: new Prisma.Decimal(data.fees ?? 0),
-        taxes: new Prisma.Decimal(data.taxes ?? 0),
-        netAmount: toDecimal(data.netAmount),
-        currencyCode: data.currencyCode ?? "BRL",
-        exchangeRate: toDecimal(data.exchangeRate),
-        externalId: data.externalId ?? null,
-        brokerNoteNumber: data.brokerNoteNumber ?? null,
-        description: data.description ?? null,
-        importedFrom: data.importedFrom ?? null,
-        importedRowRef: data.importedRowRef ?? null,
-      },
-      include: {
-        account: true,
-        asset: true,
-      },
-    });
   }
+
+  if (data.assetId) {
+    const asset = await prisma.asset.findUnique({
+      where: { id: data.assetId },
+    });
+
+    if (!asset) {
+      throw new Error("Ativo não encontrado.");
+    }
+  }
+
+  return prisma.transaction.create({
+    data: {
+      accountId: data.accountId ?? null,
+      assetId: data.assetId ?? null,
+      type: data.type,
+      status: data.status ?? "POSTED",
+      tradeDate: data.tradeDate,
+      settlementDate: data.settlementDate ?? null,
+      quantity: data.quantity ?? null,
+      unitPrice: data.unitPrice ?? null,
+      grossAmount: data.grossAmount,
+      fees: data.fees ?? 0,
+      taxes: data.taxes ?? 0,
+      netAmount: data.netAmount ?? null,
+      currencyCode: data.currencyCode ?? "BRL",
+      exchangeRate: data.exchangeRate ?? null,
+      externalId: data.externalId ?? null,
+      brokerNoteNumber: data.brokerNoteNumber ?? null,
+      description: data.description ?? null,
+      importedFrom: data.importedFrom ?? null,
+      importedRowRef: data.importedRowRef ?? null,
+    },
+    include: {
+      account: true,
+      asset: {
+        include: {
+          assetClass: true,
+        },
+      },
+    },
+  });
+}
 
   async findAll() {
     return prisma.transaction.findMany({
@@ -115,14 +121,14 @@ class TransactionsService {
     }
 
     if (data.accountId) {
-      const account = await prisma.account.findUnique({
-        where: { id: data.accountId },
-      });
+  const account = await prisma.account.findUnique({
+    where: { id: data.accountId },
+  });
 
-      if (!account) {
-        throw new Error("Conta não encontrada.");
-      }
-    }
+  if (!account) {
+    throw new Error("Conta não encontrada.");
+  }
+}
 
     if (data.assetId) {
       const asset = await prisma.asset.findUnique({
@@ -137,7 +143,7 @@ class TransactionsService {
     return prisma.transaction.update({
       where: { id },
       data: {
-        accountId: data.accountId,
+        accountId: data.accountId !== undefined ? data.accountId : undefined,
         assetId: data.assetId,
         type: data.type as any,
         status: data.status as any,

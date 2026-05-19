@@ -32,7 +32,7 @@ services:
         condition: service_healthy
     ports:
       - "${APP_PORT}:3000"
-      - "5555:5555"
+      - "55550:5555"
       - "3001:3001"
     volumes:
       - .:/app
