@@ -1,6 +1,5 @@
-import { getPrismaClient } from '../../core/prisma/prisma.service';
-
-const prisma = getPrismaClient();
+import { Prisma } from '@prisma/client';
+import { prisma } from '../../core/prisma/prisma.service';
 
 const BUY_TYPES = ['BUY', 'BONUS', 'SPLIT'];
 const SELL_TYPES = ['SELL', 'REVERSE_SPLIT'];
@@ -8,7 +7,6 @@ const SELL_TYPES = ['SELL', 'REVERSE_SPLIT'];
 function toNum(val: unknown): number {
   if (val === null || val === undefined) return 0;
   if (typeof val === 'number') return val;
-  // Prisma Decimal — tem toString()
   return parseFloat(String(val));
 }
 
@@ -68,14 +66,14 @@ export async function recalculatePortfolioItem(ticker: string) {
   });
 
   const data = {
-    quantity,
-    averagePrice,
-    investedAmount,
-    marketPrice,
-    marketValue,
-    unrealizedPnL,
-    realizedPnL,
-    lastUpdatedAt: new Date(),
+    quantity:       new Prisma.Decimal(quantity),
+    averagePrice:   new Prisma.Decimal(averagePrice),
+    investedAmount: new Prisma.Decimal(investedAmount),
+    marketPrice:    marketPrice !== null ? new Prisma.Decimal(marketPrice) : null,
+    marketValue:    new Prisma.Decimal(marketValue),
+    unrealizedPnL:  new Prisma.Decimal(unrealizedPnL),
+    realizedPnL:    new Prisma.Decimal(realizedPnL),
+    lastUpdatedAt:  new Date(),
   };
 
   let item;
@@ -94,15 +92,15 @@ export async function recalculatePortfolioItem(ticker: string) {
 
   return {
     ticker,
-    quantity: toNum(item.quantity),
-    averagePrice: toNum(item.averagePrice),
+    quantity:       toNum(item.quantity),
+    averagePrice:   toNum(item.averagePrice),
     investedAmount: toNum(item.investedAmount),
-    marketPrice: item.marketPrice ? toNum(item.marketPrice) : null,
-    marketValue: toNum(item.marketValue),
-    unrealizedPnL: toNum(item.unrealizedPnL),
-    realizedPnL: toNum(item.realizedPnL),
-    assetClass: item.asset.assetClass.code,
-    lastUpdatedAt: item.lastUpdatedAt,
+    marketPrice:    item.marketPrice ? toNum(item.marketPrice) : null,
+    marketValue:    toNum(item.marketValue),
+    unrealizedPnL:  toNum(item.unrealizedPnL),
+    realizedPnL:    toNum(item.realizedPnL),
+    assetClass:     item.asset.assetClass.code,
+    lastUpdatedAt:  item.lastUpdatedAt,
   };
 }
 
@@ -138,16 +136,16 @@ export async function listPortfolioItems() {
   });
 
   return items.map((item) => ({
-    ticker: item.asset.ticker,
-    name: item.asset.name,
-    assetClass: item.asset.assetClass.code,
-    quantity: toNum(item.quantity),
-    averagePrice: toNum(item.averagePrice),
+    ticker:         item.asset.ticker,
+    name:           item.asset.name,
+    assetClass:     item.asset.assetClass.code,
+    quantity:       toNum(item.quantity),
+    averagePrice:   toNum(item.averagePrice),
     investedAmount: toNum(item.investedAmount),
-    marketPrice: item.marketPrice ? toNum(item.marketPrice) : null,
-    marketValue: toNum(item.marketValue),
-    unrealizedPnL: toNum(item.unrealizedPnL),
-    realizedPnL: toNum(item.realizedPnL),
-    lastUpdatedAt: item.lastUpdatedAt,
+    marketPrice:    item.marketPrice ? toNum(item.marketPrice) : null,
+    marketValue:    toNum(item.marketValue),
+    unrealizedPnL:  toNum(item.unrealizedPnL),
+    realizedPnL:    toNum(item.realizedPnL),
+    lastUpdatedAt:  item.lastUpdatedAt,
   }));
 }
