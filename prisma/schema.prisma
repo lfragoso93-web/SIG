@@ -158,24 +158,29 @@ model Transaction {
 }
 
 model IncomeEvent {
-  id            String     @id @default(cuid())
+  id            String       @id @default(cuid())
   assetId       String
   accountId     String?
   type          IncomeType
-  exDate        DateTime?  @db.Date
-  paymentDate   DateTime   @db.Date
-  quantityBase  Decimal?   @db.Decimal(20, 8)
-  amountPerUnit Decimal?   @db.Decimal(20, 8)
-  grossAmount   Decimal    @db.Decimal(20, 2)
-  taxes         Decimal    @default(0) @db.Decimal(20, 2)
-  netAmount     Decimal?   @db.Decimal(20, 2)
-  currencyCode  String     @default("BRL") @db.VarChar(10)
+  status        IncomeStatus @default(CONFIRMED)
+  exDate        DateTime?    @db.Date
+  paymentDate   DateTime?    @db.Date
+  quantityBase  Decimal?     @db.Decimal(20, 8)
+  amountPerUnit Decimal?     @db.Decimal(20, 8)
+  grossAmount   Decimal?     @db.Decimal(20, 2)
+  taxes         Decimal      @default(0) @db.Decimal(20, 2)
+  netAmount     Decimal?     @db.Decimal(20, 2)
+  currencyCode  String       @default("BRL") @db.VarChar(10)
+  externalId    String?      @db.VarChar(150)
+  importedFrom  String?      @db.VarChar(100)
+  description   String?
   notes         String?
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
-  account       Account?   @relation(fields: [accountId], references: [id])
-  asset         Asset      @relation(fields: [assetId], references: [id])
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  account       Account?     @relation(fields: [accountId], references: [id])
+  asset         Asset        @relation(fields: [assetId], references: [id])
 
+  @@unique([assetId, externalId], map: "income_event_asset_externalId_unique")
   @@index([assetId, paymentDate])
   @@index([accountId, paymentDate])
   @@index([type, paymentDate])
@@ -349,7 +354,15 @@ enum IncomeType {
   COUPON
   INTEREST
   AMORTIZATION
+  SUBSCRIPTION_RIGHT
   OTHER
+}
+
+enum IncomeStatus {
+  ANNOUNCED
+  CONFIRMED
+  PAID
+  CANCELED
 }
 
 enum SnapshotPeriod {

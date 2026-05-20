@@ -12,7 +12,7 @@ type UpdateIncomeEventInput = z.infer<typeof updateIncomeEventSchema>;
 export const findAllIncomeEvents = async () => {
   return prisma.incomeEvent.findMany({
     include: { asset: { select: { ticker: true, name: true } } },
-    orderBy: { exDate: "desc" },
+    orderBy: { paymentDate: "desc" },
   });
 };
 
@@ -55,9 +55,9 @@ export const importIncomeEventsFromBrapi = async (ticker: string) => {
     assetId: asset.id,
     type: resolveIncomeType(d.label ?? ""),
     status: "CONFIRMED" as const,
-    exDate: new Date(d.lastDatePrior),
+    exDate: d.lastDatePrior ? new Date(d.lastDatePrior) : null,
     paymentDate: d.paymentDate ? new Date(d.paymentDate) : null,
-    grossAmountPerShare: String(d.rate),
+    amountPerUnit: String(d.rate),
     currencyCode: "BRL",
     importedFrom: "brapi",
     externalId: `${ticker}_${d.lastDatePrior}_${d.rate}`,
@@ -83,5 +83,6 @@ function resolveIncomeType(label: string): string {
   if (l.includes("FII") || l.includes("RENDIMENTO")) return "FII_INCOME";
   if (l.includes("COUPON") || l.includes("CUPON")) return "COUPON";
   if (l.includes("AMORT")) return "AMORTIZATION";
+  if (l.includes("SUBSCRI") || l.includes("DIREITO")) return "SUBSCRIPTION_RIGHT";
   return "DIVIDEND";
 }

@@ -2,35 +2,36 @@ import { z } from "zod";
 
 const decimalLike = z.union([z.number(), z.string()]);
 
-const incomeEventTypeEnum = z.enum([
+const incomeTypeEnum = z.enum([
   "DIVIDEND",
   "JCP",
   "FII_INCOME",
   "COUPON",
+  "INTEREST",
   "AMORTIZATION",
   "SUBSCRIPTION_RIGHT",
   "OTHER",
 ]);
 
-const incomeEventStatusEnum = z.enum(["ANNOUNCED", "CONFIRMED", "PAID", "CANCELED"]);
+const incomeStatusEnum = z.enum(["ANNOUNCED", "CONFIRMED", "PAID", "CANCELED"]);
 
 const incomeEventBaseSchema = z.object({
   assetId: z.string().min(1),
   accountId: z.string().min(1).optional().nullable(),
-  type: incomeEventTypeEnum,
-  status: incomeEventStatusEnum.optional(),
-  exDate: z.coerce.date(),
+  type: incomeTypeEnum,
+  status: incomeStatusEnum.optional(),
+  exDate: z.coerce.date().optional().nullable(),
   paymentDate: z.coerce.date().optional().nullable(),
-  grossAmountPerShare: decimalLike,
-  withholdingTaxRate: decimalLike.optional().nullable(),
-  netAmountPerShare: decimalLike.optional().nullable(),
-  quantityAtExDate: decimalLike.optional().nullable(),
-  totalGrossAmount: decimalLike.optional().nullable(),
-  totalNetAmount: decimalLike.optional().nullable(),
+  quantityBase: decimalLike.optional().nullable(),
+  amountPerUnit: decimalLike.optional().nullable(),
+  grossAmount: decimalLike.optional().nullable(),
+  taxes: decimalLike.optional(),
+  netAmount: decimalLike.optional().nullable(),
   currencyCode: z.string().min(1).max(10).optional(),
-  externalId: z.string().max(100).optional().nullable(),
-  description: z.string().optional().nullable(),
+  externalId: z.string().max(150).optional().nullable(),
   importedFrom: z.string().max(100).optional().nullable(),
+  description: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
 });
 
 export const createIncomeEventSchema = incomeEventBaseSchema;
