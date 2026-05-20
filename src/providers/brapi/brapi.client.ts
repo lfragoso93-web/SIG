@@ -52,6 +52,7 @@ interface BrapiQuoteResult {
   symbol: string;
   currency?: string | null;
   historicalDataPrice?: BrapiHistoricalRowRaw[];
+  cashDividends?: BrapiDividendRaw[];
 }
 
 interface BrapiQuoteResponse {
@@ -90,12 +91,6 @@ interface BrapiDividendRaw {
   remarks?: string;
 }
 
-interface BrapiDividendsResponse {
-  results?: Array<{
-    cashDividends?: BrapiDividendRaw[];
-  }>;
-}
-
 export class BrapiHttpError extends Error {
   public readonly status?: number;
   public readonly details?: unknown;
@@ -127,10 +122,6 @@ const buildParams = (input: GetHistoricalPricesParams): Record<string, string> =
     params.range = input.range ?? '1y';
   }
 
-  if (process.env.BRAPI_TOKEN) {
-    params.token = process.env.BRAPI_TOKEN;
-  }
-
   return params;
 };
 
@@ -149,14 +140,15 @@ class BrapiClient {
   private readonly http: AxiosInstance;
 
   constructor() {
+    const token = process.env.BRAPI_TOKEN;
+
     this.http = axios.create({
       baseURL: process.env.BRAPI_BASE_URL ?? 'https://brapi.dev/api',
       timeout: 30_000,
+      headers: token
+        ? { Authorization: `Bearer ${token}` }
+        : {},
     });
-  }
-
-  private get token(): string | undefined {
-    return process.env.BRAPI_TOKEN;
   }
 
   async getHistoricalPrices(
@@ -205,24 +197,17 @@ class BrapiClient {
   }
 
   /**
-   * Busca dividendos via brapi.dev oficial com token.
-   * Endpoint: GET /api/quote/{ticker}?modules=dividends&token=...
+   * Busca dividendos via brapi.dev oficial.
+   * Endpoint: GET /api/quote/{ticker}?modules=dividends
+   * Autenticacao: Authorization: Bearer TOKEN (via header)
    */
   async getDividends(ticker: string): Promise<BrapiCashDividend[]> {
     const t = ticker.trim().toUpperCase();
 
     try {
-      const params: Record<string, string> = {
-        modules: 'dividends',
-      };
-
-      if (this.token) {
-        params.token = this.token;
-      }
-
-      const response = await this.http.get<BrapiDividendsResponse>(
+      const response = await this.http.get<BrapiQuoteResponse>(
         `/quote/${encodeURIComponent(t)}`,
-        { params }
+        { params: { modules: 'dividends' } }
       );
 
       const cashDividends = response.data?.results?.[0]?.cashDividends ?? [];
