@@ -2,6 +2,7 @@ import express from 'express'
 import { assetClassesRouter } from './modules/asset-classes/asset-classes.routes'
 import { assetsRouter } from './modules/assets/assets.routes'
 import { transactionsRouter } from "./modules/transactions/transactions.routes";
+import priceHistoryImportRoutes from './modules/price-history/price-history.import.routes';
 
 const app = express()
 const PORT = Number(process.env.PORT ?? 3001)
@@ -16,6 +17,7 @@ app.get('/health', (_req, res) => {
   })
 })
 
+app.use('/api', priceHistoryImportRoutes)
 app.use('/asset-classes', assetClassesRouter)
 app.use('/assets', assetsRouter)
 app.use('/transactions', transactionsRouter)

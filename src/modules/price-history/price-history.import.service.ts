@@ -1,16 +1,17 @@
 // src/modules/price-history/price-history.import.service.ts
 
-import prisma from '../../core/prisma';
+import { Prisma } from '@prisma/client';
+import prisma from '../../core/prisma/prisma.service';
 import brapiClient, {
+  BrapiHistoricalPriceRow,
   BrapiInterval,
   BrapiRange,
-  BrapiHistoricalPriceRow,
 } from '../../providers/brapi/brapi.client';
 
 interface ImportPriceHistoryInput {
   ticker: string;
-  range?: BrapiRange;
   interval?: BrapiInterval;
+  range?: BrapiRange;
   startDate?: string;
   endDate?: string;
 }
@@ -29,24 +30,30 @@ class PriceHistoryImportService {
   ): Promise<ImportPriceHistoryResult> {
     const ticker = input.ticker.trim().toUpperCase();
 
+    this.validateInput(input);
+
     const asset = await prisma.asset.findUnique({
       where: { ticker },
-      select: { id: true, ticker: true },
+      select: {
+        id: true,
+        ticker: true,
+        currencyCode: true,
+      },
     });
 
     if (!asset) {
       throw new Error(`Ativo ${ticker} não encontrado na base local.`);
     }
 
-    const rows = await brapiClient.getHistoricalPrices({
+    const historicalRows = await brapiClient.getHistoricalPrices({
       ticker,
-      range: input.range,
       interval: input.interval ?? '1d',
+      range: input.range,
       startDate: input.startDate,
       endDate: input.endDate,
     });
 
-    const normalizedRows = this.normalizeRows(rows, asset.id);
+    const normalizedRows = this.normalizeRows(asset.id, asset.currencyCode, historicalRows);
 
     if (!normalizedRows.length) {
       return {
@@ -58,56 +65,73 @@ class PriceHistoryImportService {
       };
     }
 
-    const existingRows = await prisma.priceHistory.findMany({
-      where: {
-        assetId: asset.id,
-        priceDate: {
-          in: normalizedRows.map((row) => row.priceDate),
-        },
-      },
-      select: {
-        priceDate: true,
-      },
+    const createManyResult = await prisma.priceHistory.createMany({
+      data: normalizedRows,
+      skipDuplicates: true,
     });
 
-    const existingDates = new Set(
-      existingRows.map((row) => row.priceDate.toISOString().slice(0, 10))
-    );
-
-    const rowsToInsert = normalizedRows.filter(
-      (row) => !existingDates.has(row.priceDate.toISOString().slice(0, 10))
-    );
-
-    if (rowsToInsert.length) {
-      await prisma.priceHistory.createMany({
-        data: rowsToInsert,
-        skipDuplicates: true,
-      });
-    }
+    const inserted = createManyResult.count;
+    const requested = normalizedRows.length;
+    const skipped = requested - inserted;
 
     return {
       assetId: asset.id,
       ticker: asset.ticker,
-      requested: normalizedRows.length,
-      inserted: rowsToInsert.length,
-      skipped: normalizedRows.length - rowsToInsert.length,
+      requested,
+      inserted,
+      skipped,
     };
   }
 
-  private normalizeRows(rows: BrapiHistoricalPriceRow[], assetId: string) {
-    return rows
-      .filter((row) => row.date && row.close != null)
-      .map((row) => ({
+  private validateInput(input: ImportPriceHistoryInput) {
+    const hasStartDate = !!input.startDate;
+    const hasEndDate = !!input.endDate;
+
+    if (hasStartDate !== hasEndDate) {
+      throw new Error('startDate e endDate devem ser informados juntos.');
+    }
+  }
+
+  private normalizeRows(
+    assetId: string,
+    fallbackCurrencyCode: string,
+    rows: BrapiHistoricalPriceRow[]
+  ): Prisma.PriceHistoryCreateManyInput[] {
+    const deduplicated = new Map<string, Prisma.PriceHistoryCreateManyInput>();
+
+    for (const row of rows) {
+      if (!row.date || row.close == null) {
+        continue;
+      }
+
+      const priceDate = new Date(`${row.date}T00:00:00.000Z`);
+
+      if (Number.isNaN(priceDate.getTime())) {
+        continue;
+      }
+
+      deduplicated.set(row.date, {
         assetId,
-        priceDate: new Date(`${row.date}T00:00:00.000Z`),
-        openPrice: row.open ?? row.close ?? 0,
-        highPrice: row.high ?? row.close ?? 0,
-        lowPrice: row.low ?? row.close ?? 0,
-        closePrice: row.close ?? 0,
-        adjustedClosePrice: row.adjustedClose ?? row.close ?? 0,
-        volume: row.volume ?? null,
+        priceDate,
+        openPrice: this.toPrismaDecimal(row.open),
+        highPrice: this.toPrismaDecimal(row.high),
+        lowPrice: this.toPrismaDecimal(row.low),
+        closePrice: new Prisma.Decimal(row.close),
+        adjustedClose: this.toPrismaDecimal(row.adjustedClose),
+        currencyCode: row.currencyCode ?? fallbackCurrencyCode ?? 'BRL',
         source: 'BRAPI',
-      }));
+      });
+    }
+
+    return Array.from(deduplicated.values());
+  }
+
+  private toPrismaDecimal(value: number | null): Prisma.Decimal | null {
+    if (value == null) {
+      return null;
+    }
+
+    return new Prisma.Decimal(value);
   }
 }
 
