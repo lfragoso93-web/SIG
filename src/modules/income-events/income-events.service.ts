@@ -57,6 +57,7 @@ export const importIncomeEventsFromBrapi = async (ticker: string) => {
     exDate: d.lastDatePrior ? new Date(d.lastDatePrior) : null,
     paymentDate: d.paymentDate ? new Date(d.paymentDate) : null,
     amountPerUnit: String(d.rate),
+    grossAmount: null,
     currencyCode: "BRL",
     importedFrom: "brapi",
     externalId: `${ticker}_${d.lastDatePrior}_${d.rate}`,
