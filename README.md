@@ -1,6 +1,6 @@
 # SIG — Sistema de Investimentos
 
-Backend de gestão de carteira de investimentos, desenvolvido em Node.js com TypeScript, Express, Prisma ORM e PostgreSQL. Integra dados de mercado via [brapi.dev](https://brapi.dev) para importação de histórico de preços de ativos da B3.
+Backend de gestão de carteira de investimentos, desenvolvido em Node.js com TypeScript, Express, Prisma ORM e PostgreSQL. Integra dados de mercado via [brapi.dev](https://brapi.dev) para importação de histórico de preços e proventos de ativos da B3.
 
 ---
 
@@ -19,28 +19,47 @@ Backend de gestão de carteira de investimentos, desenvolvido em Node.js com Typ
 
 ---
 
+## Status dos módulos
+
+| Módulo | Endpoints | Status |
+|---|---|---|
+| `asset-classes` | CRUD completo | ✅ Validado |
+| `assets` | CRUD completo | ✅ Validado |
+| `transactions` | CRUD completo | ✅ Validado |
+| `income-events` | Import via brapi | ✅ Validado (60 dividendos PETR4) |
+| `price-history` | Import via brapi | ✅ Validado (998 candles PETR4 5y) |
+| `portfolio-items` | Posição consolidada | 🔲 Pendente |
+| `portfolio-snapshots` | Fotografia periódica | 🔲 Pendente |
+
+---
+
 ## Estrutura do projeto
 
 ```
 src/
 ├── core/
 │   └── prisma/
-│       └── prisma.service.ts        # Singleton do PrismaClient com adapter pg
+│       └── prisma.service.ts          # Singleton do PrismaClient com adapter pg
 ├── modules/
-│   ├── asset-classes/               # Classificação macro dos ativos
-│   ├── assets/                      # Cadastro de ativos (ticker, tipo, classe)
-│   ├── transactions/                # Compras, vendas, aportes e resgates
-│   └── price-history/               # Histórico de preços importado via brapi
-│       ├── price-history.schema.ts  # Schemas Zod de validação
-│       ├── price-history.service.ts # Lógica de importação e persistência
+│   ├── asset-classes/                 # Classificação macro dos ativos
+│   ├── assets/                        # Cadastro de ativos (ticker, tipo, classe)
+│   ├── transactions/                  # Compras, vendas, aportes e resgates
+│   ├── income-events/                 # Proventos: dividendos, JCP, FII income
+│   │   ├── income-events.schema.ts
+│   │   ├── income-events.service.ts
+│   │   ├── income-events.controller.ts
+│   │   └── income-events.routes.ts
+│   └── price-history/                 # Histórico de preços importado via brapi
+│       ├── price-history.schema.ts
+│       ├── price-history.service.ts
 │       ├── price-history.controller.ts
 │       └── price-history.routes.ts
 ├── providers/
 │   └── brapi/
-│       └── brapi.client.ts          # Cliente HTTP para a API brapi.dev
-└── index.ts                         # Entry point — Express app
+│       └── brapi.client.ts            # Cliente HTTP para a API brapi.dev
+└── index.ts                           # Entry point — Express app
 prisma/
-└── schema.prisma                    # Modelos Prisma
+└── schema.prisma                      # Modelos Prisma
 ```
 
 ---
@@ -104,10 +123,19 @@ docker volume create sig_postgres_data
 docker compose up --build
 
 # Aplicar migrations do Prisma (em outro terminal)
-docker exec -it docker-app npx prisma migrate deploy
+docker compose exec app npx prisma migrate deploy
 
 # Popular dados de referência (seed)
-docker exec -it docker-app npm run seed
+docker compose exec app npm run seed
+```
+
+### Após alterar o schema Prisma
+
+Sempre que o `schema.prisma` for alterado, regenere o client dentro do container antes de reiniciar:
+
+```bash
+docker compose exec app npx prisma generate
+docker compose restart app
 ```
 
 ---
@@ -150,6 +178,26 @@ PATCH  /transactions/:id
 DELETE /transactions/:id
 ```
 
+O campo `accountId` é opcional — a gestão da carteira é orientada ao ativo, não à corretora.
+
+### Income Events
+
+```
+POST /income-events/import/:ticker
+```
+
+**Resposta:**
+```json
+{
+  "ticker": "PETR4",
+  "inserted": 60,
+  "skipped": 0,
+  "total": 60
+}
+```
+
+> Importa dividendos, JCP e outros proventos históricos via brapi. Idempotente — duplicatas ignoradas via `skipDuplicates: true`.
+
 ### Price History
 
 ```
@@ -159,7 +207,7 @@ POST /price-history/import/:ticker
 **Body (range):**
 ```json
 {
-  "range": "1y",
+  "range": "5y",
   "interval": "1d"
 }
 ```
@@ -177,23 +225,24 @@ POST /price-history/import/:ticker
 ```json
 {
   "ticker": "PETR4",
-  "inserted": 250,
-  "skipped": 0,
-  "total": 250
+  "inserted": 998,
+  "skipped": 250,
+  "total": 1248
 }
 ```
 
-> A importação é idempotente — registros duplicados são ignorados via `skipDuplicates: true` respeitando a constraint `@@unique([assetId, priceDate])` do schema.
+> Idempotente — duplicatas ignoradas via constraint `@@unique([assetId, priceDate])`.
 
 ---
 
 ## Integração brapi.dev
 
-O cliente `BrapiClient` em `src/providers/brapi/brapi.client.ts` consome o endpoint `/quote/:ticker` da [brapi.dev](https://brapi.dev/docs/acoes), suportando:
+O cliente `BrapiClient` em `src/providers/brapi/brapi.client.ts` consome a [brapi.dev](https://brapi.dev/docs/acoes), suportando:
 
-- `range`: janela temporal pré-definida (`1d`, `1mo`, `1y`, `max`, etc.)
+- `range`: janela temporal pré-definida (`1d`, `1mo`, `1y`, `5y`, `max`, etc.)
 - `startDate` + `endDate`: intervalo personalizado no formato `YYYY-MM-DD`
 - `interval`: granularidade dos candles (`1d`, `1wk`, `1mo`, etc.)
+- `dividends=true`: proventos históricos por ticker
 
 O token de autenticação é lido da variável `BRAPI_TOKEN`. Se não definido, a API é consumida no plano gratuito.
 
@@ -218,13 +267,17 @@ O token de autenticação é lido da variável `BRAPI_TOKEN`. Se não definido, 
 
 O `accountId` em `Transaction` é opcional porque a gestão da carteira é orientada ao ativo, não à corretora. Isso permite registrar operações sem vínculo obrigatório com uma conta/custodiante.
 
+### Import idempotente
+
+Todos os endpoints de importação usam `skipDuplicates: true` no Prisma e `externalId` como chave de deduplicação, permitindo que o mesmo import seja reexecutado sem efeitos colaterais.
+
 ---
 
 ## Próximos passos
 
-- [ ] Importação de dividendos via brapi (`dividends=true`)
-- [ ] Endpoint de importação em lote (múltiplos tickers)
-- [ ] Módulo `income-events` com rotas CRUD
-- [ ] Cálculo de posição atual (`PortfolioItem`) a partir de transações
+- [ ] Endpoint de importação em lote (múltiplos tickers de uma vez)
+- [ ] CRUD completo para `income-events`
+- [ ] Cálculo de posição atual (`PortfolioItem`) a partir das transações
 - [ ] Geração de snapshots periódicos da carteira
+- [ ] Importação da planilha `Investimentos-Leo.xlsx` para carga inicial
 - [ ] Autenticação e controle de acesso
