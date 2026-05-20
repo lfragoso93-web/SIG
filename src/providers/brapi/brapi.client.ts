@@ -52,6 +52,9 @@ interface BrapiQuoteResult {
   symbol: string;
   currency?: string | null;
   historicalDataPrice?: BrapiHistoricalRowRaw[];
+  dividendsData?: {
+    cashDividends?: BrapiCashDividend[];
+  };
 }
 
 interface BrapiQuoteResponse {
@@ -66,6 +69,18 @@ export interface BrapiHistoricalPriceRow {
   close: number | null;
   adjustedClose: number | null;
   currencyCode: string;
+}
+
+export interface BrapiCashDividend {
+  assetIssued: string;
+  paymentDate: string;
+  rate: number;
+  relatedTo: string;
+  approvedOn: string;
+  isinCode: string;
+  label: string;
+  lastDatePrior: string;
+  remarks: string;
 }
 
 export class BrapiHttpError extends Error {
@@ -166,6 +181,42 @@ class BrapiClient {
       if (error instanceof BrapiHttpError) throw error;
       throw new BrapiHttpError(
         `Erro ao consultar brapi para o ticker ${ticker}: ${error?.message}`,
+        error?.response?.status,
+        error?.response?.data
+      );
+    }
+  }
+
+  async getDividends(ticker: string): Promise<BrapiCashDividend[]> {
+    const t = ticker.trim().toUpperCase();
+
+    try {
+      const params: Record<string, string> = { modules: 'dividends' };
+
+      if (process.env.BRAPI_TOKEN) {
+        params.token = process.env.BRAPI_TOKEN;
+      }
+
+      const response = await this.http.get<BrapiQuoteResponse>(
+        `/quote/${encodeURIComponent(t)}`,
+        { params }
+      );
+
+      const result = response.data?.results?.[0];
+
+      if (!result) {
+        throw new BrapiHttpError(
+          `Nenhum resultado para o ticker ${t}.`,
+          response.status,
+          response.data
+        );
+      }
+
+      return result.dividendsData?.cashDividends ?? [];
+    } catch (error: any) {
+      if (error instanceof BrapiHttpError) throw error;
+      throw new BrapiHttpError(
+        `Erro ao consultar dividendos na brapi para ${t}: ${error?.message}`,
         error?.response?.status,
         error?.response?.data
       );

@@ -4,7 +4,7 @@ import type {
   createIncomeEventSchema,
   updateIncomeEventSchema,
 } from "./income-events.schema";
-import { BrapiClient } from "../../providers/brapi/brapi.client";
+import { brapiClient } from "../../providers/brapi/brapi.client";
 
 type CreateIncomeEventInput = z.infer<typeof createIncomeEventSchema>;
 type UpdateIncomeEventInput = z.infer<typeof updateIncomeEventSchema>;
@@ -44,14 +44,13 @@ export const importIncomeEventsFromBrapi = async (ticker: string) => {
     throw new Error(`Ativo com ticker "${ticker}" não encontrado.`);
   }
 
-  const brapiData = await BrapiClient.getDividends(ticker);
-  const dividends = brapiData.results?.[0]?.dividendsData?.cashDividends ?? [];
+  const dividends = await brapiClient.getDividends(ticker);
 
   if (dividends.length === 0) {
     return { ticker, inserted: 0, skipped: 0, total: 0 };
   }
 
-  const records = dividends.map((d: any) => ({
+  const records = dividends.map((d) => ({
     assetId: asset.id,
     type: resolveIncomeType(d.label ?? ""),
     status: "CONFIRMED" as const,
