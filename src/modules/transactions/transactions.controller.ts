@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { transactionsService } from "./transactions.service";
+import transactionsService from "./transactions.service";
 import {
   createTransactionSchema,
   updateTransactionSchema,

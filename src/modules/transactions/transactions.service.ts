@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../core/prisma/prisma.service";
 
+type DecimalInput = string | number | Prisma.Decimal | null | undefined;
+
 type CreateTransactionInput = {
   accountId?: string | null;
   assetId?: string | null;
@@ -8,14 +10,14 @@ type CreateTransactionInput = {
   status?: string;
   tradeDate: Date;
   settlementDate?: Date | null;
-  quantity?: string | number | null;
-  unitPrice?: string | number | null;
-  grossAmount: string | number;
-  fees?: string | number;
-  taxes?: string | number;
-  netAmount?: string | number | null;
+  quantity?: DecimalInput;
+  unitPrice?: DecimalInput;
+  grossAmount: DecimalInput;
+  fees?: DecimalInput;
+  taxes?: DecimalInput;
+  netAmount?: DecimalInput;
   currencyCode?: string;
-  exchangeRate?: string | number | null;
+  exchangeRate?: DecimalInput;
   externalId?: string | null;
   brokerNoteNumber?: string | null;
   description?: string | null;
@@ -23,87 +25,104 @@ type CreateTransactionInput = {
   importedRowRef?: string | null;
 };
 
-type UpdateTransactionInput = Partial<CreateTransactionInput>;
+type UpdateTransactionInput = {
+  accountId?: string | null;
+  assetId?: string | null;
+  type?: string;
+  status?: string;
+  tradeDate?: Date;
+  settlementDate?: Date | null;
+  quantity?: DecimalInput;
+  unitPrice?: DecimalInput;
+  grossAmount?: DecimalInput;
+  fees?: DecimalInput;
+  taxes?: DecimalInput;
+  netAmount?: DecimalInput;
+  currencyCode?: string;
+  exchangeRate?: DecimalInput;
+  externalId?: string | null;
+  brokerNoteNumber?: string | null;
+  description?: string | null;
+  importedFrom?: string | null;
+  importedRowRef?: string | null;
+};
 
-const toDecimal = (value?: string | number | null) => {
-  if (value === undefined || value === null || value === "") return undefined;
+const transactionInclude = {
+  account: true,
+  asset: {
+    include: {
+      assetClass: true,
+    },
+  },
+};
+
+const toDecimal = (value: DecimalInput) => {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
   return new Prisma.Decimal(value);
 };
 
 class TransactionsService {
   async create(data: CreateTransactionInput) {
-  if (data.accountId) {
-    const account = await prisma.account.findUnique({
-      where: { id: data.accountId },
-    });
+    if (data.accountId) {
+      const account = await prisma.account.findUnique({
+        where: { id: data.accountId },
+      });
 
-    if (!account) {
-      throw new Error("Conta não encontrada.");
+      if (!account) {
+        throw new Error("Conta não encontrada.");
+      }
     }
-  }
 
-  if (data.assetId) {
-    const asset = await prisma.asset.findUnique({
-      where: { id: data.assetId },
-    });
+    if (data.assetId) {
+      const asset = await prisma.asset.findUnique({
+        where: { id: data.assetId },
+      });
 
-    if (!asset) {
-      throw new Error("Ativo não encontrado.");
+      if (!asset) {
+        throw new Error("Ativo não encontrado.");
+      }
     }
-  }
 
-  return prisma.transaction.create({
-    data: {
-      accountId: data.accountId ?? null,
-      assetId: data.assetId ?? null,
-      type: data.type,
-      status: data.status ?? "POSTED",
-      tradeDate: data.tradeDate,
-      settlementDate: data.settlementDate ?? null,
-      quantity: data.quantity ?? null,
-      unitPrice: data.unitPrice ?? null,
-      grossAmount: data.grossAmount,
-      fees: data.fees ?? 0,
-      taxes: data.taxes ?? 0,
-      netAmount: data.netAmount ?? null,
-      currencyCode: data.currencyCode ?? "BRL",
-      exchangeRate: data.exchangeRate ?? null,
-      externalId: data.externalId ?? null,
-      brokerNoteNumber: data.brokerNoteNumber ?? null,
-      description: data.description ?? null,
-      importedFrom: data.importedFrom ?? null,
-      importedRowRef: data.importedRowRef ?? null,
-    },
-    include: {
-      account: true,
-      asset: {
-        include: {
-          assetClass: true,
-        },
+    return prisma.transaction.create({
+      data: {
+        accountId: data.accountId ?? null,
+        assetId: data.assetId ?? null,
+        type: data.type as any,
+        status: (data.status ?? "POSTED") as any,
+        tradeDate: data.tradeDate,
+        settlementDate: data.settlementDate ?? null,
+        quantity: toDecimal(data.quantity),
+        unitPrice: toDecimal(data.unitPrice),
+        grossAmount: new Prisma.Decimal(data.grossAmount as string | number | Prisma.Decimal),
+        fees: toDecimal(data.fees) ?? new Prisma.Decimal(0),
+        taxes: toDecimal(data.taxes) ?? new Prisma.Decimal(0),
+        netAmount: toDecimal(data.netAmount),
+        currencyCode: data.currencyCode ?? "BRL",
+        exchangeRate: toDecimal(data.exchangeRate),
+        externalId: data.externalId ?? null,
+        brokerNoteNumber: data.brokerNoteNumber ?? null,
+        description: data.description ?? null,
+        importedFrom: data.importedFrom ?? null,
+        importedRowRef: data.importedRowRef ?? null,
       },
-    },
-  });
-}
+      include: transactionInclude,
+    });
+  }
 
   async findAll() {
     return prisma.transaction.findMany({
-      include: {
-        account: true,
-        asset: true,
-      },
-      orderBy: {
-        tradeDate: "desc",
-      },
+      orderBy: [{ tradeDate: "desc" }, { createdAt: "desc" }],
+      include: transactionInclude,
     });
   }
 
   async findById(id: string) {
     const transaction = await prisma.transaction.findUnique({
       where: { id },
-      include: {
-        account: true,
-        asset: true,
-      },
+      include: transactionInclude,
     });
 
     if (!transaction) {
@@ -114,21 +133,23 @@ class TransactionsService {
   }
 
   async update(id: string, data: UpdateTransactionInput) {
-    const existing = await prisma.transaction.findUnique({ where: { id } });
+    const existingTransaction = await prisma.transaction.findUnique({
+      where: { id },
+    });
 
-    if (!existing) {
+    if (!existingTransaction) {
       throw new Error("Transação não encontrada.");
     }
 
     if (data.accountId) {
-  const account = await prisma.account.findUnique({
-    where: { id: data.accountId },
-  });
+      const account = await prisma.account.findUnique({
+        where: { id: data.accountId },
+      });
 
-  if (!account) {
-    throw new Error("Conta não encontrada.");
-  }
-}
+      if (!account) {
+        throw new Error("Conta não encontrada.");
+      }
+    }
 
     if (data.assetId) {
       const asset = await prisma.asset.findUnique({
@@ -143,37 +164,58 @@ class TransactionsService {
     return prisma.transaction.update({
       where: { id },
       data: {
-        accountId: data.accountId !== undefined ? data.accountId : undefined,
-        assetId: data.assetId,
-        type: data.type as any,
-        status: data.status as any,
-        tradeDate: data.tradeDate,
-        settlementDate: data.settlementDate,
-        quantity: data.quantity !== undefined ? toDecimal(data.quantity) : undefined,
-        unitPrice: data.unitPrice !== undefined ? toDecimal(data.unitPrice) : undefined,
-        grossAmount: data.grossAmount !== undefined ? new Prisma.Decimal(data.grossAmount) : undefined,
-        fees: data.fees !== undefined ? new Prisma.Decimal(data.fees) : undefined,
-        taxes: data.taxes !== undefined ? new Prisma.Decimal(data.taxes) : undefined,
-        netAmount: data.netAmount !== undefined ? toDecimal(data.netAmount) : undefined,
-        currencyCode: data.currencyCode,
-        exchangeRate: data.exchangeRate !== undefined ? toDecimal(data.exchangeRate) : undefined,
-        externalId: data.externalId,
-        brokerNoteNumber: data.brokerNoteNumber,
-        description: data.description,
-        importedFrom: data.importedFrom,
-        importedRowRef: data.importedRowRef,
+        accountId:
+          data.accountId !== undefined ? data.accountId : undefined,
+        assetId:
+          data.assetId !== undefined ? data.assetId : undefined,
+        type: data.type !== undefined ? (data.type as any) : undefined,
+        status: data.status !== undefined ? (data.status as any) : undefined,
+        tradeDate: data.tradeDate ?? undefined,
+        settlementDate:
+          data.settlementDate !== undefined ? data.settlementDate : undefined,
+        quantity:
+          data.quantity !== undefined ? toDecimal(data.quantity) : undefined,
+        unitPrice:
+          data.unitPrice !== undefined ? toDecimal(data.unitPrice) : undefined,
+        grossAmount:
+          data.grossAmount !== undefined
+            ? new Prisma.Decimal(data.grossAmount as string | number | Prisma.Decimal)
+            : undefined,
+        fees:
+          data.fees !== undefined ? toDecimal(data.fees) : undefined,
+        taxes:
+          data.taxes !== undefined ? toDecimal(data.taxes) : undefined,
+        netAmount:
+          data.netAmount !== undefined ? toDecimal(data.netAmount) : undefined,
+        currencyCode:
+          data.currencyCode !== undefined ? data.currencyCode : undefined,
+        exchangeRate:
+          data.exchangeRate !== undefined
+            ? toDecimal(data.exchangeRate)
+            : undefined,
+        externalId:
+          data.externalId !== undefined ? data.externalId : undefined,
+        brokerNoteNumber:
+          data.brokerNoteNumber !== undefined
+            ? data.brokerNoteNumber
+            : undefined,
+        description:
+          data.description !== undefined ? data.description : undefined,
+        importedFrom:
+          data.importedFrom !== undefined ? data.importedFrom : undefined,
+        importedRowRef:
+          data.importedRowRef !== undefined ? data.importedRowRef : undefined,
       },
-      include: {
-        account: true,
-        asset: true,
-      },
+      include: transactionInclude,
     });
   }
 
   async remove(id: string) {
-    const existing = await prisma.transaction.findUnique({ where: { id } });
+    const existingTransaction = await prisma.transaction.findUnique({
+      where: { id },
+    });
 
-    if (!existing) {
+    if (!existingTransaction) {
       throw new Error("Transação não encontrada.");
     }
 
@@ -183,4 +225,4 @@ class TransactionsService {
   }
 }
 
-export const transactionsService = new TransactionsService();
+export default new TransactionsService();
