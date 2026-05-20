@@ -52,9 +52,6 @@ interface BrapiQuoteResult {
   symbol: string;
   currency?: string | null;
   historicalDataPrice?: BrapiHistoricalRowRaw[];
-  dividendsData?: {
-    cashDividends?: BrapiCashDividend[];
-  };
 }
 
 interface BrapiQuoteResponse {
@@ -77,7 +74,6 @@ export interface BrapiCashDividend {
   rate: number;
   relatedTo: string;
   approvedOn: string;
-  isinCode: string;
   label: string;
   lastDatePrior: string;
   remarks: string;
@@ -134,11 +130,20 @@ const toNullableNumber = (value: unknown): number | null =>
 
 class BrapiClient {
   private readonly http: AxiosInstance;
+  private readonly yahooHttp: AxiosInstance;
 
   constructor() {
     this.http = axios.create({
-      baseURL: process.env.BRAPI_BASE_URL ?? 'https://brapi.dev/api',
+      baseURL: process.env.BRAPI_BASE_URL ?? 'https://brapi.ga/api',
       timeout: 30_000,
+    });
+
+    this.yahooHttp = axios.create({
+      baseURL: 'https://query1.finance.yahoo.com',
+      timeout: 30_000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+      },
     });
   }
 
@@ -187,36 +192,51 @@ class BrapiClient {
     }
   }
 
+  /**
+   * Busca dividendos via Yahoo Finance diretamente.
+   * A brapi v1 (0peters/brapi) nao suporta modulo de dividendos.
+   * Usamos Yahoo Finance v8/chart com events=div.
+   */
   async getDividends(ticker: string): Promise<BrapiCashDividend[]> {
     const t = ticker.trim().toUpperCase();
+    const yahooTicker = `${t}.SA`;
 
     try {
-      const params: Record<string, string> = { modules: 'dividends' };
-
-      if (process.env.BRAPI_TOKEN) {
-        params.token = process.env.BRAPI_TOKEN;
-      }
-
-      const response = await this.http.get<BrapiQuoteResponse>(
-        `/quote/${encodeURIComponent(t)}`,
-        { params }
+      const response = await this.yahooHttp.get(
+        `/v8/finance/chart/${encodeURIComponent(yahooTicker)}`,
+        {
+          params: {
+            interval: '1d',
+            range: 'max',
+            events: 'div',
+          },
+        }
       );
 
-      const result = response.data?.results?.[0];
-
+      const result = response.data?.chart?.result?.[0];
       if (!result) {
-        throw new BrapiHttpError(
-          `Nenhum resultado para o ticker ${t}.`,
-          response.status,
-          response.data
-        );
+        return [];
       }
 
-      return result.dividendsData?.cashDividends ?? [];
+      const rawDividends: Record<string, { amount: number; date: number }> =
+        result.events?.dividends ?? {};
+
+      return Object.values(rawDividends).map((d) => {
+        const dateStr = new Date(d.date * 1000).toISOString().slice(0, 10);
+        return {
+          assetIssued: t,
+          paymentDate: dateStr,
+          rate: d.amount,
+          relatedTo: '',
+          approvedOn: dateStr,
+          label: 'DIVIDENDO',
+          lastDatePrior: dateStr,
+          remarks: '',
+        };
+      });
     } catch (error: any) {
-      if (error instanceof BrapiHttpError) throw error;
       throw new BrapiHttpError(
-        `Erro ao consultar dividendos na brapi para ${t}: ${error?.message}`,
+        `Erro ao consultar dividendos no Yahoo Finance para ${t}: ${error?.message}`,
         error?.response?.status,
         error?.response?.data
       );
