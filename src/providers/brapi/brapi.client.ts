@@ -52,7 +52,6 @@ interface BrapiQuoteResult {
   symbol: string;
   currency?: string | null;
   historicalDataPrice?: BrapiHistoricalRowRaw[];
-  cashDividends?: BrapiDividendRaw[];
 }
 
 interface BrapiQuoteResponse {
@@ -78,17 +77,6 @@ export interface BrapiCashDividend {
   label: string;
   lastDatePrior: string;
   remarks: string;
-}
-
-interface BrapiDividendRaw {
-  assetIssued?: string;
-  paymentDate?: string;
-  rate?: number;
-  relatedTo?: string;
-  approvedOn?: string;
-  label?: string;
-  lastDatePrior?: string;
-  remarks?: string;
 }
 
 export class BrapiHttpError extends Error {
@@ -137,7 +125,11 @@ const toNullableNumber = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
 
 class BrapiClient {
+  /** Cliente principal: brapi.dev — cotacoes e historico de precos */
   private readonly http: AxiosInstance;
+
+  /** Cliente auxiliar: Yahoo Finance — dividendos (nao incluso no plano brapi atual) */
+  private readonly yahooHttp: AxiosInstance;
 
   constructor() {
     const token = process.env.BRAPI_TOKEN;
@@ -145,9 +137,13 @@ class BrapiClient {
     this.http = axios.create({
       baseURL: process.env.BRAPI_BASE_URL ?? 'https://brapi.dev/api',
       timeout: 30_000,
-      headers: token
-        ? { Authorization: `Bearer ${token}` }
-        : {},
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+    this.yahooHttp = axios.create({
+      baseURL: 'https://query1.finance.yahoo.com',
+      timeout: 30_000,
+      headers: { 'User-Agent': 'Mozilla/5.0' },
     });
   }
 
@@ -197,35 +193,48 @@ class BrapiClient {
   }
 
   /**
-   * Busca dividendos via brapi.dev oficial.
-   * Endpoint: GET /api/quote/{ticker}?modules=dividends
-   * Autenticacao: Authorization: Bearer TOKEN (via header)
+   * Busca dividendos via Yahoo Finance.
+   * O modulo "dividends" nao esta disponivel no plano atual da brapi.dev.
+   * Yahoo Finance retorna historico completo via /v8/finance/chart com events=div.
    */
   async getDividends(ticker: string): Promise<BrapiCashDividend[]> {
     const t = ticker.trim().toUpperCase();
+    const yahooTicker = `${t}.SA`;
 
     try {
-      const response = await this.http.get<BrapiQuoteResponse>(
-        `/quote/${encodeURIComponent(t)}`,
-        { params: { modules: 'dividends' } }
+      const response = await this.yahooHttp.get(
+        `/v8/finance/chart/${encodeURIComponent(yahooTicker)}`,
+        {
+          params: {
+            interval: '1d',
+            range: 'max',
+            events: 'div',
+          },
+        }
       );
 
-      const cashDividends = response.data?.results?.[0]?.cashDividends ?? [];
+      const result = response.data?.chart?.result?.[0];
+      if (!result) return [];
 
-      return cashDividends.map((d) => ({
-        assetIssued: d.assetIssued ?? t,
-        paymentDate: d.paymentDate ?? '',
-        rate: d.rate ?? 0,
-        relatedTo: d.relatedTo ?? '',
-        approvedOn: d.approvedOn ?? '',
-        label: d.label ?? 'DIVIDENDO',
-        lastDatePrior: d.lastDatePrior ?? d.paymentDate ?? '',
-        remarks: d.remarks ?? '',
-      }));
+      const rawDividends: Record<string, { amount: number; date: number }> =
+        result.events?.dividends ?? {};
+
+      return Object.values(rawDividends).map((d) => {
+        const dateStr = new Date(d.date * 1000).toISOString().slice(0, 10);
+        return {
+          assetIssued: t,
+          paymentDate: dateStr,
+          rate: d.amount,
+          relatedTo: '',
+          approvedOn: dateStr,
+          label: 'DIVIDENDO',
+          lastDatePrior: dateStr,
+          remarks: '',
+        };
+      });
     } catch (error: any) {
-      if (error instanceof BrapiHttpError) throw error;
       throw new BrapiHttpError(
-        `Erro ao consultar dividendos na brapi para ${t}: ${error?.message}`,
+        `Erro ao consultar dividendos no Yahoo Finance para ${t}: ${error?.message}`,
         error?.response?.status,
         error?.response?.data
       );
