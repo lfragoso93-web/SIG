@@ -1,5 +1,3 @@
-// src/providers/brapi/brapi.client.ts
-
 import axios, { AxiosInstance } from 'axios';
 
 export type BrapiRange =
@@ -38,8 +36,6 @@ export interface GetHistoricalPricesParams {
   range?: BrapiRange;
   startDate?: string;
   endDate?: string;
-  dividends?: boolean;
-  modules?: string[];
 }
 
 interface BrapiHistoricalRowRaw {
@@ -54,17 +50,12 @@ interface BrapiHistoricalRowRaw {
 
 interface BrapiQuoteResult {
   symbol: string;
-  shortName?: string | null;
-  longName?: string | null;
   currency?: string | null;
-  regularMarketPrice?: number | null;
-  regularMarketTime?: string | number | null;
   historicalDataPrice?: BrapiHistoricalRowRaw[];
 }
 
 interface BrapiQuoteResponse {
   results: BrapiQuoteResult[];
-  requestedAt?: string;
 }
 
 export interface BrapiHistoricalPriceRow {
@@ -74,7 +65,7 @@ export interface BrapiHistoricalPriceRow {
   low: number | null;
   close: number | null;
   adjustedClose: number | null;
-  volume: number | null;
+  currencyCode: string;
 }
 
 export class BrapiHttpError extends Error {
@@ -89,19 +80,50 @@ export class BrapiHttpError extends Error {
   }
 }
 
+const buildParams = (input: GetHistoricalPricesParams): Record<string, string> => {
+  const hasStartDate = !!input.startDate;
+  const hasEndDate = !!input.endDate;
+
+  if (hasStartDate !== hasEndDate) {
+    throw new Error('startDate e endDate devem ser informados juntos.');
+  }
+
+  const params: Record<string, string> = {
+    interval: input.interval ?? '1d',
+  };
+
+  if (hasStartDate && hasEndDate) {
+    params.startDate = input.startDate!;
+    params.endDate = input.endDate!;
+  } else {
+    params.range = input.range ?? '1y';
+  }
+
+  if (process.env.BRAPI_TOKEN) {
+    params.token = process.env.BRAPI_TOKEN;
+  }
+
+  return params;
+};
+
+const normalizeDate = (value: string | number): string => {
+  if (typeof value === 'number') {
+    return new Date(value * 1000).toISOString().slice(0, 10);
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
+};
+
+const toNullableNumber = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
 class BrapiClient {
   private readonly http: AxiosInstance;
 
   constructor() {
     this.http = axios.create({
-      baseURL: process.env.BRAPI_BASE_URL || 'https://brapi.dev/api',
-      timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(process.env.BRAPI_TOKEN
-          ? { Authorization: `Bearer ${process.env.BRAPI_TOKEN}` }
-          : {}),
-      },
+      baseURL: process.env.BRAPI_BASE_URL ?? 'https://brapi.dev/api',
+      timeout: 30_000,
     });
   }
 
@@ -109,9 +131,9 @@ class BrapiClient {
     input: GetHistoricalPricesParams
   ): Promise<BrapiHistoricalPriceRow[]> {
     const ticker = input.ticker.trim().toUpperCase();
-    const params = this.buildHistoricalParams(input);
 
     try {
+      const params = buildParams(input);
       const response = await this.http.get<BrapiQuoteResponse>(
         `/quote/${encodeURIComponent(ticker)}`,
         { params }
@@ -121,89 +143,34 @@ class BrapiClient {
 
       if (!result) {
         throw new BrapiHttpError(
-          `Nenhum resultado encontrado para o ticker ${ticker}`,
+          `Nenhum resultado para o ticker ${ticker}.`,
           response.status,
           response.data
         );
       }
 
-      const rows = result.historicalDataPrice ?? [];
+      const currencyCode = result.currency ?? 'BRL';
 
-      return rows
+      return (result.historicalDataPrice ?? [])
         .map((row) => ({
-          date: this.normalizeDate(row.date),
-          open: this.toNullableNumber(row.open),
-          high: this.toNullableNumber(row.high),
-          low: this.toNullableNumber(row.low),
-          close: this.toNullableNumber(row.close),
-          adjustedClose: this.toNullableNumber(row.adjustedClose),
-          volume: this.toNullableNumber(row.volume),
+          date: normalizeDate(row.date),
+          open: toNullableNumber(row.open),
+          high: toNullableNumber(row.high),
+          low: toNullableNumber(row.low),
+          close: toNullableNumber(row.close),
+          adjustedClose: toNullableNumber(row.adjustedClose),
+          currencyCode,
         }))
-        .filter((row) => !!row.date);
+        .filter((row) => !!row.date && row.close !== null);
     } catch (error: any) {
-      if (error instanceof BrapiHttpError) {
-        throw error;
-      }
-
+      if (error instanceof BrapiHttpError) throw error;
       throw new BrapiHttpError(
-        `Erro ao consultar histórico na brapi para o ticker ${ticker}`,
+        `Erro ao consultar brapi para o ticker ${ticker}: ${error?.message}`,
         error?.response?.status,
         error?.response?.data
       );
     }
   }
-
-  private buildHistoricalParams(input: GetHistoricalPricesParams) {
-    const hasStartDate = !!input.startDate;
-    const hasEndDate = !!input.endDate;
-
-    if (hasStartDate !== hasEndDate) {
-      throw new Error('startDate e endDate devem ser informados juntos.');
-    }
-
-    const params: Record<string, string> = {
-      interval: input.interval ?? '1d',
-    };
-
-    if (hasStartDate && hasEndDate) {
-      params.startDate = input.startDate!;
-      params.endDate = input.endDate!;
-    } else {
-      params.range = input.range ?? '1y';
-    }
-
-    if (typeof input.dividends === 'boolean') {
-      params.dividends = String(input.dividends);
-    }
-
-    if (input.modules?.length) {
-      params.modules = input.modules.join(',');
-    }
-
-    if (!process.env.BRAPI_TOKEN && process.env.BRAPI_TOKEN_QUERY) {
-      params.token = process.env.BRAPI_TOKEN_QUERY;
-    }
-
-    return params;
-  }
-
-  private normalizeDate(value: string | number): string {
-    if (typeof value === 'number') {
-      return new Date(value * 1000).toISOString().slice(0, 10);
-    }
-
-    const parsed = new Date(value);
-
-    if (Number.isNaN(parsed.getTime())) {
-      return '';
-    }
-
-    return parsed.toISOString().slice(0, 10);
-  }
-
-  private toNullableNumber(value: unknown): number | null {
-    return typeof value === 'number' && Number.isFinite(value) ? value : null;
-  }
 }
 
-export default new BrapiClient();
+export const brapiClient = new BrapiClient();
