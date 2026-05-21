@@ -1,4 +1,4 @@
-# ── Estágio 1: dependências ───────────────────────────────────────────────────
+# ── Estágio 1: dependências ──────────────────────────────────────────
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 
@@ -8,17 +8,19 @@ RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists
 COPY package*.json ./
 RUN npm ci
 
-# ── Estágio 2: build TypeScript ───────────────────────────────────────────────
+# ── Estágio 2: build TypeScript ──────────────────────────────────────
 FROM deps AS builder
 COPY . .
 
-# prisma generate só gera o client TypeScript — não precisa de banco real.
-# A DATABASE_URL é exigida pelo prisma.config.ts (que usa dotenv),
-# por isso passamos um valor ficticio apenas para este step.
-RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate
+# prisma generate só gera o client TypeScript — não conecta ao banco.
+# DATABASE_URL é obrigatório apenas para validação do schema.prisma.
+ARG DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy
+ENV DATABASE_URL=${DATABASE_URL}
+
+RUN npx prisma generate
 RUN npm run build
 
-# ── Estágio 3: imagem final (sem devDependencies) ─────────────────────────────
+# ── Estágio 3: imagem final (sem devDependencies) ────────────────────
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 

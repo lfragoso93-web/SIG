@@ -2,10 +2,12 @@ generator client {
   provider = "prisma-client-js"
 }
 
-// A URL do banco é gerenciada pelo prisma.config.ts via process.env["DATABASE_URL"].
-// Não defina url aqui para evitar conflito com o prisma.config.ts.
+// A URL é lida de DATABASE_URL em runtime.
+// O prisma.config.ts sobrescreve via process.env em dev/migrations,
+// mas o schema.prisma precisa do campo url para validação do Prisma CLI.
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 /// Tabela de referência para classificação macro dos ativos.
