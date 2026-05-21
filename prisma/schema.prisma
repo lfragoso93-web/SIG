@@ -287,7 +287,7 @@ model PortfolioAssetSnapshot {
 model PortfolioItem {
   id             String    @id @default(cuid())
   assetId        String
-  accountId      String
+  accountId      String?   // opcional: null = posição consolidada sem conta
   quantity       Decimal   @default(0) @db.Decimal(20, 8)
   averagePrice   Decimal?  @db.Decimal(20, 8)
   investedAmount Decimal   @default(0) @db.Decimal(20, 2)
@@ -298,7 +298,7 @@ model PortfolioItem {
   lastUpdatedAt  DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
-  account        Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account        Account?  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   asset          Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
   @@unique([assetId, accountId])

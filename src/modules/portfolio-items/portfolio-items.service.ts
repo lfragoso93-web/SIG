@@ -4,9 +4,6 @@ import { prisma } from '../../core/prisma/prisma.service';
 const BUY_TYPES  = ['BUY', 'BONUS', 'SPLIT'];
 const SELL_TYPES = ['SELL', 'REVERSE_SPLIT'];
 
-// ID fictício que representa o portfolio consolidado (sem conta)
-const CONSOLIDATED_ACCOUNT_ID = 'consolidated';
-
 function toNum(val: unknown): number {
   if (val === null || val === undefined) return 0;
   if (typeof val === 'number') return val;
@@ -44,7 +41,7 @@ function calcPositionFromTxs(
 
 async function upsertPortfolioItem(
   assetId: string,
-  accountId: string,
+  accountId: string | null,
   marketPrice: number | null,
   transactions: { type: string; quantity: unknown; unitPrice: unknown }[],
 ) {
@@ -65,8 +62,9 @@ async function upsertPortfolioItem(
     lastUpdatedAt:  new Date(),
   };
 
-  const existing = await prisma.portfolioItem.findUnique({
-    where: { assetId_accountId: { assetId, accountId } },
+  // Com accountId nullable, o unique [assetId, accountId] funciona com null
+  const existing = await prisma.portfolioItem.findFirst({
+    where: { assetId, accountId: accountId ?? null },
   });
 
   if (existing) {
@@ -78,7 +76,7 @@ async function upsertPortfolioItem(
   }
 
   return prisma.portfolioItem.create({
-    data:    { assetId, accountId, ...data },
+    data:    { assetId, accountId: accountId ?? null, ...data },
     include: { asset: { include: { assetClass: true } } },
   });
 }
@@ -98,10 +96,10 @@ export async function recalculatePortfolioItem(ticker: string) {
     orderBy: { tradeDate: 'asc' },
   });
 
-  // Agrupa transações por conta (null vira CONSOLIDATED_ACCOUNT_ID)
-  const byAccount = new Map<string, typeof allTxs>();
+  // Agrupa transações por conta (null = sem conta)
+  const byAccount = new Map<string | null, typeof allTxs>();
   for (const tx of allTxs) {
-    const key = tx.accountId ?? CONSOLIDATED_ACCOUNT_ID;
+    const key = tx.accountId ?? null;
     if (!byAccount.has(key)) byAccount.set(key, []);
     byAccount.get(key)!.push(tx);
   }
@@ -112,7 +110,7 @@ export async function recalculatePortfolioItem(ticker: string) {
     const item = await upsertPortfolioItem(asset.id, accountId, marketPrice, txs);
     items.push({
       ticker,
-      accountId: accountId === CONSOLIDATED_ACCOUNT_ID ? null : accountId,
+      accountId,
       quantity:       toNum(item.quantity),
       averagePrice:   toNum(item.averagePrice),
       investedAmount: toNum(item.investedAmount),
@@ -162,7 +160,7 @@ export async function listPortfolioItems() {
     ticker:         item.asset.ticker,
     name:           item.asset.name,
     assetClass:     item.asset.assetClass.code,
-    accountId:      item.accountId === CONSOLIDATED_ACCOUNT_ID ? null : item.accountId,
+    accountId:      item.accountId ?? null,
     quantity:       toNum(item.quantity),
     averagePrice:   toNum(item.averagePrice),
     investedAmount: toNum(item.investedAmount),
