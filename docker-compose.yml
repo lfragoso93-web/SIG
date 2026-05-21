@@ -43,7 +43,7 @@ services:
       CORS_ORIGIN:   ${CORS_ORIGIN}
     ports:
       - "${APP_PORT}:3001"
-      - "5555:5555"
+      - "55550:5555"
     
     networks:
       - sig_network
