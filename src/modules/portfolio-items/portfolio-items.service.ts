@@ -61,8 +61,9 @@ export async function recalculatePortfolioItem(ticker: string) {
   const marketValue = marketPrice ? quantity * marketPrice : 0;
   const unrealizedPnL = marketPrice ? marketValue - investedAmount : 0;
 
+  // Busca o portfolioItem consolidado para este ativo (sem filtro de conta)
   const existing = await prisma.portfolioItem.findFirst({
-    where: { assetId: asset.id, accountId: null },
+    where: { assetId: asset.id },
   });
 
   const data = {
@@ -85,7 +86,7 @@ export async function recalculatePortfolioItem(ticker: string) {
     });
   } else {
     item = await prisma.portfolioItem.create({
-      data: { assetId: asset.id, accountId: null, ...data },
+      data: { assetId: asset.id, ...data },
       include: { asset: { include: { assetClass: true } } },
     });
   }
