@@ -18,6 +18,7 @@ type AllocationClassResult = {
 
 type AllocationResult = {
   referenceDate: string
+  snapshotReferenceDate: string
   period: SnapshotPeriod
   monthlyContribution: number
   totalCurrentValue: number
@@ -33,7 +34,7 @@ const decimalToNumber = (value: Prisma.Decimal | null | undefined) => {
 
 export class AllocationService {
   async calculate(query: AllocationQueryInput, body: AllocationBodyInput): Promise<AllocationResult> {
-    const referenceDate = query.referenceDate ?? new Date()
+    const requestedReferenceDate = query.referenceDate ?? new Date()
     const period = query.period ?? SnapshotPeriod.WEEKLY
     const monthlyContribution = body.monthlyContribution
 
@@ -41,7 +42,7 @@ export class AllocationService {
       where: {
         period,
         referenceDate: {
-          lte: referenceDate,
+          lte: requestedReferenceDate,
         },
       },
       orderBy: {
@@ -79,21 +80,43 @@ export class AllocationService {
       },
     })
 
+    const snapshotByClassId = new Map(
+      snapshot.classSnapshots.map((item) => [item.assetClassId, item])
+    )
+
     const targetByClassId = new Map(
       activeTargets.map((target) => [target.assetClassId, target])
+    )
+
+    const allClassIds = Array.from(
+      new Set([
+        ...snapshot.classSnapshots.map((item) => item.assetClassId),
+        ...activeTargets.map((target) => target.assetClassId),
+      ])
     )
 
     const totalCurrentValue = decimalToNumber(snapshot.totalMarketValue)
     const totalTargetValue = totalCurrentValue + monthlyContribution
 
-    const baseRows = snapshot.classSnapshots.map((item) => {
-      const currentAmount = decimalToNumber(item.marketValue)
-      const currentPercentage =
-        item.currentPercentage !== null ? item.currentPercentage.toNumber() : null
+    const baseRows = allClassIds.map((assetClassId) => {
+      const snapshotItem = snapshotByClassId.get(assetClassId)
+      const target = targetByClassId.get(assetClassId)
+      const assetClass = snapshotItem?.assetClass ?? target?.assetClass
 
-      const target = targetByClassId.get(item.assetClassId)
+      if (!assetClass) {
+        throw new Error(`Classe de ativo não encontrada para assetClassId=${assetClassId}`)
+      }
+
+      const currentAmount = snapshotItem ? decimalToNumber(snapshotItem.marketValue) : 0
+      const currentPercentage =
+        snapshotItem?.currentPercentage != null
+          ? snapshotItem.currentPercentage.toNumber()
+          : totalCurrentValue > 0
+            ? currentAmount / totalCurrentValue
+            : null
+
       const targetPercentage =
-        target?.targetPercentage ? target.targetPercentage.toNumber() : null
+        target?.targetPercentage != null ? target.targetPercentage.toNumber() : null
 
       const targetAmount =
         targetPercentage !== null ? totalTargetValue * targetPercentage : 0
@@ -102,9 +125,9 @@ export class AllocationService {
       const gapAmount = rawGap > 0 ? rawGap : 0
 
       return {
-        assetClassId: item.assetClassId,
-        code: item.assetClass.code,
-        name: item.assetClass.name,
+        assetClassId,
+        code: assetClass.code,
+        name: assetClass.name,
         currentAmount,
         currentPercentage,
         targetPercentage,
@@ -115,42 +138,45 @@ export class AllocationService {
 
     const totalGapPositive = baseRows.reduce((sum, item) => sum + item.gapAmount, 0)
 
-    const classes: AllocationClassResult[] = baseRows.map((item) => {
-      const suggestedContribution =
-        totalGapPositive > 0
-          ? (item.gapAmount / totalGapPositive) * monthlyContribution
-          : 0
+    const classes: AllocationClassResult[] = baseRows
+      .map((item) => {
+        const suggestedContribution =
+          totalGapPositive > 0
+            ? (item.gapAmount / totalGapPositive) * monthlyContribution
+            : 0
 
-      const projectedAmount = item.currentAmount + suggestedContribution
-      const projectedPercentage =
-        totalTargetValue > 0 ? projectedAmount / totalTargetValue : null
+        const projectedAmount = item.currentAmount + suggestedContribution
+        const projectedPercentage =
+          totalTargetValue > 0 ? projectedAmount / totalTargetValue : null
 
-      return {
-        assetClassId: item.assetClassId,
-        code: item.code,
-        name: item.name,
-        currentAmount: Number(item.currentAmount.toFixed(2)),
-        currentPercentage:
-          item.currentPercentage !== null
-            ? Number(item.currentPercentage.toFixed(6))
-            : null,
-        targetPercentage:
-          item.targetPercentage !== null
-            ? Number(item.targetPercentage.toFixed(6))
-            : null,
-        targetAmount: Number(item.targetAmount.toFixed(2)),
-        gapAmount: Number(item.gapAmount.toFixed(2)),
-        suggestedContribution: Number(suggestedContribution.toFixed(2)),
-        projectedAmount: Number(projectedAmount.toFixed(2)),
-        projectedPercentage:
-          projectedPercentage !== null
-            ? Number(projectedPercentage.toFixed(6))
-            : null,
-      }
-    })
+        return {
+          assetClassId: item.assetClassId,
+          code: item.code,
+          name: item.name,
+          currentAmount: Number(item.currentAmount.toFixed(2)),
+          currentPercentage:
+            item.currentPercentage !== null
+              ? Number(item.currentPercentage.toFixed(6))
+              : null,
+          targetPercentage:
+            item.targetPercentage !== null
+              ? Number(item.targetPercentage.toFixed(6))
+              : null,
+          targetAmount: Number(item.targetAmount.toFixed(2)),
+          gapAmount: Number(item.gapAmount.toFixed(2)),
+          suggestedContribution: Number(suggestedContribution.toFixed(2)),
+          projectedAmount: Number(projectedAmount.toFixed(2)),
+          projectedPercentage:
+            projectedPercentage !== null
+              ? Number(projectedPercentage.toFixed(6))
+              : null,
+        }
+      })
+      .sort((a, b) => b.gapAmount - a.gapAmount)
 
     return {
-      referenceDate: snapshot.referenceDate.toISOString().slice(0, 10),
+      referenceDate: requestedReferenceDate.toISOString().slice(0, 10),
+      snapshotReferenceDate: snapshot.referenceDate.toISOString().slice(0, 10),
       period: snapshot.period,
       monthlyContribution: Number(monthlyContribution.toFixed(2)),
       totalCurrentValue: Number(totalCurrentValue.toFixed(2)),
