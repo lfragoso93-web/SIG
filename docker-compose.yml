@@ -2,7 +2,7 @@ name: sig
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB:       ${POSTGRES_DB:-sig_db}
@@ -24,7 +24,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: runner        # usa o estágio final enxuto
+      target: runner
     restart: unless-stopped
     depends_on:
       db:
