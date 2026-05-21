@@ -1,9 +1,10 @@
 import { Router } from 'express';
-import { priceHistoryController } from './price-history.controller';
+import { importPriceHistory, importPriceHistoryBatch } from './price-history.controller';
 
 export const priceHistoryRouter = Router();
 
-priceHistoryRouter.post(
-  '/import/:ticker',
-  (req, res) => priceHistoryController.importFromBrapi(req, res)
-);
+// Importa histórico de um ticker específico
+priceHistoryRouter.post('/import/:ticker', importPriceHistory);
+
+// Importa em lote: body.tickers[] ou todos os ativos ativos
+priceHistoryRouter.post('/import-batch', importPriceHistoryBatch);

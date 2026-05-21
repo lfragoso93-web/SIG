@@ -12,6 +12,7 @@ interface ImportPriceHistoryResult {
   inserted: number;
   skipped: number;
   total: number;
+  error?: string;
 }
 
 class PriceHistoryService {
@@ -60,6 +61,53 @@ class PriceHistoryService {
     const skipped = rows.length - inserted;
 
     return { ticker, inserted, skipped, total: rows.length };
+  }
+
+  async importBatch(
+    tickers: string[],
+    options: Omit<ImportPriceHistoryBody, 'ticker'>,
+  ): Promise<{ results: ImportPriceHistoryResult[]; summary: { total: number; inserted: number; skipped: number; errors: number } }> {
+    const results: ImportPriceHistoryResult[] = [];
+
+    for (const ticker of tickers) {
+      try {
+        const result = await this.importFromBrapi({ ticker, ...options });
+        results.push(result);
+      } catch (err) {
+        results.push({
+          ticker,
+          inserted: 0,
+          skipped: 0,
+          total: 0,
+          error: (err as Error).message,
+        });
+      }
+    }
+
+    const summary = results.reduce(
+      (acc, r) => ({
+        total:    acc.total    + r.total,
+        inserted: acc.inserted + r.inserted,
+        skipped:  acc.skipped  + r.skipped,
+        errors:   acc.errors   + (r.error ? 1 : 0),
+      }),
+      { total: 0, inserted: 0, skipped: 0, errors: 0 },
+    );
+
+    return { results, summary };
+  }
+
+  async importAllAssets(
+    options: Omit<ImportPriceHistoryBody, 'ticker'>,
+  ) {
+    const assets = await prisma.asset.findMany({
+      where: { isActive: true },
+      select: { ticker: true },
+      orderBy: { ticker: 'asc' },
+    });
+
+    const tickers = assets.map((a) => a.ticker);
+    return this.importBatch(tickers, options);
   }
 }
 

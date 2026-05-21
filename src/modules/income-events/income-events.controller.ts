@@ -6,47 +6,53 @@ import {
   updateIncomeEvent,
   deleteIncomeEvent,
   importIncomeEventsFromBrapi,
+  importIncomeEventsBatch,
 } from "./income-events.service";
 import {
   createIncomeEventSchema,
   updateIncomeEventSchema,
-  incomeEventIdParamSchema,
-  importIncomeEventsParamSchema,
 } from "./income-events.schema";
 
-export const getAll = async (_req: Request, res: Response) => {
-  const data = await findAllIncomeEvents();
-  res.json(data);
+export const getIncomeEvents = async (_req: Request, res: Response) => {
+  const events = await findAllIncomeEvents();
+  res.json(events);
 };
 
-export const getById = async (req: Request, res: Response) => {
-  const { id } = incomeEventIdParamSchema.parse(req.params);
-  const data = await findIncomeEventById(id);
-  if (!data) return res.status(404).json({ error: "IncomeEvent não encontrado." });
-  res.json(data);
+export const getIncomeEventById = async (req: Request, res: Response) => {
+  const event = await findIncomeEventById(req.params.id);
+  if (!event) { res.status(404).json({ error: 'Provento não encontrado' }); return; }
+  res.json(event);
 };
 
-export const create = async (req: Request, res: Response) => {
-  const body = createIncomeEventSchema.parse(req.body);
-  const data = await createIncomeEvent(body);
-  res.status(201).json(data);
+export const postIncomeEvent = async (req: Request, res: Response) => {
+  const parsed = createIncomeEventSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+  const event = await createIncomeEvent(parsed.data);
+  res.status(201).json(event);
 };
 
-export const update = async (req: Request, res: Response) => {
-  const { id } = incomeEventIdParamSchema.parse(req.params);
-  const body = updateIncomeEventSchema.parse(req.body);
-  const data = await updateIncomeEvent(id, body);
-  res.json(data);
+export const patchIncomeEvent = async (req: Request, res: Response) => {
+  const parsed = updateIncomeEventSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+  const event = await updateIncomeEvent(req.params.id, parsed.data);
+  res.json(event);
 };
 
-export const remove = async (req: Request, res: Response) => {
-  const { id } = incomeEventIdParamSchema.parse(req.params);
-  await deleteIncomeEvent(id);
+export const deleteIncomeEventById = async (req: Request, res: Response) => {
+  await deleteIncomeEvent(req.params.id);
   res.status(204).send();
 };
 
-export const importFromBrapi = async (req: Request, res: Response) => {
-  const { ticker } = importIncomeEventsParamSchema.parse(req.params);
+export const importIncomeEvents = async (req: Request, res: Response) => {
+  const ticker = req.params.ticker?.toUpperCase();
   const result = await importIncomeEventsFromBrapi(ticker);
+  res.json(result);
+};
+
+export const importIncomeEventsBatchHandler = async (req: Request, res: Response) => {
+  const tickers: string[] | undefined = Array.isArray(req.body?.tickers)
+    ? req.body.tickers.map((t: string) => t.toUpperCase())
+    : undefined;
+  const result = await importIncomeEventsBatch(tickers);
   res.json(result);
 };

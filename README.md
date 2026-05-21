@@ -26,9 +26,9 @@ Backend de gestão de carteira de investimentos, desenvolvido em Node.js com Typ
 | `asset-classes` | CRUD completo | ✅ Validado |
 | `assets` | CRUD completo | ✅ Validado |
 | `transactions` | CRUD completo | ✅ Validado |
-| `income-events` | Import via brapi | ✅ Validado (60 dividendos PETR4) |
-| `price-history` | Import via brapi | ✅ Validado (998 candles PETR4 5y) |
-| `portfolio-items` | Posição consolidada | 🔲 Pendente |
+| `income-events` | CRUD + import por ticker + import em lote | ✅ Validado |
+| `price-history` | Import por ticker + import em lote | ✅ Validado |
+| `portfolio-items` | Recalculo por ticker + recalculo total | ✅ Validado |
 | `portfolio-snapshots` | Fotografia periódica | 🔲 Pendente |
 
 ---
@@ -49,11 +49,14 @@ src/
 │   │   ├── income-events.service.ts
 │   │   ├── income-events.controller.ts
 │   │   └── income-events.routes.ts
-│   └── price-history/                 # Histórico de preços importado via brapi
-│       ├── price-history.schema.ts
-│       ├── price-history.service.ts
-│       ├── price-history.controller.ts
-│       └── price-history.routes.ts
+│   ├── price-history/                 # Histórico de preços importado via brapi
+│   │   ├── price-history.schema.ts
+│   │   ├── price-history.service.ts
+│   │   ├── price-history.controller.ts
+│   │   └── price-history.routes.ts
+│   └── portfolio-items/               # Posição atual consolidada por ativo
+│       ├── portfolio-items.service.ts
+│       └── portfolio-items.controller.ts
 ├── providers/
 │   └── brapi/
 │       └── brapi.client.ts            # Cliente HTTP para a API brapi.dev
@@ -73,7 +76,7 @@ prisma/
 | `Transaction` | Operações: `BUY`, `SELL`, `DEPOSIT`, `WITHDRAW`, `SPLIT`, etc. |
 | `IncomeEvent` | Proventos: `DIVIDEND`, `JCP`, `FII_INCOME`, `COUPON`, etc. |
 | `PriceHistory` | Histórico OHLC diário por ativo, com `@@unique([assetId, priceDate])` |
-| `PortfolioItem` | Posição atual consolidada por ativo e conta |
+| `PortfolioItem` | Posição atual consolidada por ativo (accountId opcional) |
 | `PortfolioSnapshot` | Fotografia periódica da carteira (diária, mensal, anual) |
 | `AllocationTarget` | Metas de alocação por classe com vigência temporal |
 
@@ -183,55 +186,97 @@ O campo `accountId` é opcional — a gestão da carteira é orientada ao ativo,
 ### Income Events
 
 ```
-POST /income-events/import/:ticker
+GET    /income-events
+POST   /income-events
+GET    /income-events/:id
+PATCH  /income-events/:id
+DELETE /income-events/:id
+
+POST   /income-events/import/:ticker
+POST   /income-events/import-batch
 ```
 
-**Resposta:**
+**import/:ticker — Resposta:**
+```json
+{ "ticker": "PETR4", "inserted": 60, "skipped": 0, "total": 60 }
+```
+
+**import-batch — Body:**
+```json
+{ "tickers": ["PETR4", "VALE3", "HGLG11"] }
+```
+> Se `tickers` for omitido ou vazio, importa todos os ativos ativos do banco.
+
+**import-batch — Resposta:**
 ```json
 {
-  "ticker": "PETR4",
-  "inserted": 60,
-  "skipped": 0,
-  "total": 60
+  "summary": { "total": 180, "inserted": 120, "skipped": 60, "errors": 0 },
+  "results": [
+    { "ticker": "PETR4", "inserted": 60, "skipped": 0, "total": 60 },
+    { "ticker": "VALE3", "inserted": 45, "skipped": 15, "total": 60 }
+  ]
 }
 ```
-
-> Importa dividendos, JCP e outros proventos históricos via brapi. Idempotente — duplicatas ignoradas via `skipDuplicates: true`.
 
 ### Price History
 
 ```
 POST /price-history/import/:ticker
+POST /price-history/import-batch
 ```
 
-**Body (range):**
+**import/:ticker — Body (range):**
+```json
+{ "range": "5y", "interval": "1d" }
+```
+
+**import/:ticker — Body (datas explícitas):**
+```json
+{ "startDate": "2024-01-01", "endDate": "2024-12-31", "interval": "1d" }
+```
+
+**import-batch — Body:**
+```json
+{ "tickers": ["PETR4", "VALE3"], "range": "5y", "interval": "1d" }
+```
+> Se `tickers` for omitido ou vazio, importa histórico de todos os ativos ativos.
+
+**import-batch — Resposta:**
 ```json
 {
-  "range": "5y",
-  "interval": "1d"
+  "summary": { "total": 2496, "inserted": 1996, "skipped": 500, "errors": 0 },
+  "results": [
+    { "ticker": "PETR4", "inserted": 998, "skipped": 250, "total": 1248 },
+    { "ticker": "VALE3", "inserted": 998, "skipped": 250, "total": 1248 }
+  ]
 }
 ```
 
-**Body (datas explícitas):**
-```json
-{
-  "startDate": "2024-01-01",
-  "endDate": "2024-12-31",
-  "interval": "1d"
-}
+### Portfolio Items
+
+```
+GET  /portfolio-items
+POST /portfolio-items/recalculate/:ticker
+POST /portfolio-items/recalculate
 ```
 
-**Resposta:**
+**recalculate/:ticker — Resposta:**
 ```json
 {
   "ticker": "PETR4",
-  "inserted": 998,
-  "skipped": 250,
-  "total": 1248
+  "accounts": 1,
+  "items": [{
+    "accountId": null,
+    "quantity": 100,
+    "averagePrice": 36.5,
+    "investedAmount": 3650,
+    "marketPrice": 44.6,
+    "marketValue": 4460,
+    "unrealizedPnL": 810,
+    "realizedPnL": 0
+  }]
 }
 ```
-
-> Idempotente — duplicatas ignoradas via constraint `@@unique([assetId, priceDate])`.
 
 ---
 
@@ -265,19 +310,19 @@ O token de autenticação é lido da variável `BRAPI_TOKEN`. Se não definido, 
 
 ### Transactions orientadas ao ativo
 
-O `accountId` em `Transaction` é opcional porque a gestão da carteira é orientada ao ativo, não à corretora. Isso permite registrar operações sem vínculo obrigatório com uma conta/custodiante.
+O `accountId` em `Transaction` e `PortfolioItem` é opcional porque a gestão da carteira é orientada ao ativo, não à corretora. Isso permite registrar operações sem vínculo obrigatório com uma conta/custodiante.
 
 ### Import idempotente
 
 Todos os endpoints de importação usam `skipDuplicates: true` no Prisma e `externalId` como chave de deduplicação, permitindo que o mesmo import seja reexecutado sem efeitos colaterais.
 
+### Import em lote
+
+Os endpoints `import-batch` de `price-history` e `income-events` processam os tickers **sequencialmente** (não em paralelo) para não sobrecarregar a API brapi.dev. Erros em um ticker são capturados individualmente e reportados no campo `error` do resultado, sem interromper o restante do lote.
+
 ---
 
 ## Próximos passos
 
-- [ ] Endpoint de importação em lote (múltiplos tickers de uma vez)
-- [ ] CRUD completo para `income-events`
-- [ ] Cálculo de posição atual (`PortfolioItem`) a partir das transações
-- [ ] Geração de snapshots periódicos da carteira
-- [ ] Importação da planilha `Investimentos-Leo.xlsx` para carga inicial
+- [ ] `portfolio-snapshots` — fotografia periódica da carteira
 - [ ] Autenticação e controle de acesso

@@ -77,6 +77,50 @@ export const importIncomeEventsFromBrapi = async (ticker: string) => {
   };
 };
 
+export const importIncomeEventsBatch = async (tickers?: string[]) => {
+  // Se não informado, usa todos os ativos ativos
+  const assets = tickers && tickers.length > 0
+    ? await prisma.asset.findMany({
+        where: { ticker: { in: tickers }, isActive: true },
+        select: { ticker: true },
+        orderBy: { ticker: 'asc' },
+      })
+    : await prisma.asset.findMany({
+        where: { isActive: true },
+        select: { ticker: true },
+        orderBy: { ticker: 'asc' },
+      });
+
+  const results: { ticker: string; inserted: number; skipped: number; total: number; error?: string }[] = [];
+
+  for (const asset of assets) {
+    try {
+      const result = await importIncomeEventsFromBrapi(asset.ticker);
+      results.push(result);
+    } catch (err) {
+      results.push({
+        ticker: asset.ticker,
+        inserted: 0,
+        skipped: 0,
+        total: 0,
+        error: (err as Error).message,
+      });
+    }
+  }
+
+  const summary = results.reduce(
+    (acc, r) => ({
+      total:    acc.total    + r.total,
+      inserted: acc.inserted + r.inserted,
+      skipped:  acc.skipped  + r.skipped,
+      errors:   acc.errors   + (r.error ? 1 : 0),
+    }),
+    { total: 0, inserted: 0, skipped: 0, errors: 0 },
+  );
+
+  return { results, summary };
+};
+
 function resolveIncomeType(label: string): string {
   const l = label.toUpperCase();
   if (l.includes("JCP") || l.includes("JUROS")) return "JCP";

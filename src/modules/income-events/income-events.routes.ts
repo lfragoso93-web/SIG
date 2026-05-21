@@ -1,18 +1,20 @@
 import { Router } from "express";
 import {
-  getAll,
-  getById,
-  create,
-  update,
-  remove,
-  importFromBrapi,
+  getIncomeEvents,
+  getIncomeEventById,
+  postIncomeEvent,
+  patchIncomeEvent,
+  deleteIncomeEventById,
+  importIncomeEvents,
+  importIncomeEventsBatchHandler,
 } from "./income-events.controller";
 
 export const incomeEventsRouter = Router();
 
-incomeEventsRouter.get("/", getAll);
-incomeEventsRouter.post("/", create);
-incomeEventsRouter.get("/:id", getById);
-incomeEventsRouter.patch("/:id", update);
-incomeEventsRouter.delete("/:id", remove);
-incomeEventsRouter.post("/import/:ticker", importFromBrapi);
+incomeEventsRouter.get('/',           getIncomeEvents);
+incomeEventsRouter.post('/',          postIncomeEvent);
+incomeEventsRouter.get('/:id',        getIncomeEventById);
+incomeEventsRouter.patch('/:id',      patchIncomeEvent);
+incomeEventsRouter.delete('/:id',     deleteIncomeEventById);
+incomeEventsRouter.post('/import/:ticker',  importIncomeEvents);
+incomeEventsRouter.post('/import-batch',    importIncomeEventsBatchHandler);
