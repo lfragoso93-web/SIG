@@ -12,7 +12,7 @@ export async function listItems(req: Request, res: Response) {
 }
 
 export async function recalculateTicker(req: Request, res: Response) {
-  const ticker = req.params.ticker?.toUpperCase();
+  const ticker = String(req.params.ticker).toUpperCase();
   if (!ticker) {
     res.status(400).json({ message: 'ticker obrigatório' });
     return;

@@ -1,12 +1,10 @@
-// src/modules/price-history/price-history.import.controller.ts
-
 import { Request, Response } from 'express';
 import priceHistoryImportService from './price-history.import.service';
 
 class PriceHistoryImportController {
   async importFromBrapi(req: Request, res: Response) {
     try {
-      const { ticker } = req.params;
+      const ticker = String(req.params.ticker);
       const { interval, range, startDate, endDate } = req.body;
 
       const result = await priceHistoryImportService.importFromBrapi({

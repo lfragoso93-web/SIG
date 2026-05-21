@@ -44,7 +44,7 @@ export const listSnapshotsHandler = async (req: Request, res: Response) => {
 };
 
 export const getSnapshotByDateHandler = async (req: Request, res: Response) => {
-  const date = new Date(req.params.date);
+  const date = new Date(String(req.params.date));
   if (isNaN(date.getTime())) {
     res.status(400).json({ error: 'Data inválida. Use o formato YYYY-MM-DD.' });
     return;

@@ -19,7 +19,7 @@ export const getIncomeEvents = async (_req: Request, res: Response) => {
 };
 
 export const getIncomeEventById = async (req: Request, res: Response) => {
-  const event = await findIncomeEventById(req.params.id);
+  const event = await findIncomeEventById(String(req.params.id));
   if (!event) { res.status(404).json({ error: 'Provento não encontrado' }); return; }
   res.json(event);
 };
@@ -34,17 +34,17 @@ export const postIncomeEvent = async (req: Request, res: Response) => {
 export const patchIncomeEvent = async (req: Request, res: Response) => {
   const parsed = updateIncomeEventSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-  const event = await updateIncomeEvent(req.params.id, parsed.data);
+  const event = await updateIncomeEvent(String(req.params.id), parsed.data);
   res.json(event);
 };
 
 export const deleteIncomeEventById = async (req: Request, res: Response) => {
-  await deleteIncomeEvent(req.params.id);
+  await deleteIncomeEvent(String(req.params.id));
   res.status(204).send();
 };
 
 export const importIncomeEvents = async (req: Request, res: Response) => {
-  const ticker = req.params.ticker?.toUpperCase();
+  const ticker = String(req.params.ticker).toUpperCase();
   const result = await importIncomeEventsFromBrapi(ticker);
   res.json(result);
 };

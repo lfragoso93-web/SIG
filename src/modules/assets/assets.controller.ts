@@ -18,7 +18,7 @@ export class AssetsController {
 
   async findByTicker(req: Request, res: Response) {
     try {
-      const { ticker } = req.params
+      const ticker = String(req.params.ticker)
       const data = await assetsService.findByTicker(ticker)
 
       if (!data) {
@@ -66,7 +66,7 @@ export class AssetsController {
 
   async updateByTicker(req: Request, res: Response) {
     try {
-      const { ticker } = req.params
+      const ticker = String(req.params.ticker)
       const {
         name,
         normalizedName,
@@ -104,7 +104,7 @@ export class AssetsController {
       }
 
       const data = await assetsService.updateByTicker(
-        String(ticker).trim().toUpperCase(),
+        ticker.trim().toUpperCase(),
         payload
       )
 
@@ -121,9 +121,9 @@ export class AssetsController {
 
   async deleteByTicker(req: Request, res: Response) {
     try {
-      const { ticker } = req.params
+      const ticker = String(req.params.ticker)
 
-      await assetsService.deleteByTicker(String(ticker).trim().toUpperCase())
+      await assetsService.deleteByTicker(ticker.trim().toUpperCase())
 
       return res.status(204).send()
     } catch (error) {

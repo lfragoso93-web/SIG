@@ -3,7 +3,7 @@ import { priceHistoryService } from './price-history.service';
 import { importPriceHistorySchema, importPriceHistoryBatchSchema } from './price-history.schema';
 
 export const importPriceHistory = async (req: Request, res: Response) => {
-  const ticker = req.params.ticker?.toUpperCase();
+  const ticker = String(req.params.ticker).toUpperCase();
   const parsed = importPriceHistorySchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -25,7 +25,6 @@ export const importPriceHistoryBatch = async (req: Request, res: Response) => {
 
   const { tickers, ...options } = parsed.data;
 
-  // Se tickers não informado ou vazio → importa todos os ativos ativos
   if (!tickers || tickers.length === 0) {
     const result = await priceHistoryService.importAllAssets(options);
     res.json(result);

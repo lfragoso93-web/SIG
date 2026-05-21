@@ -18,7 +18,7 @@ export class AssetClassesController {
 
   async findByCode(req: Request, res: Response) {
     try {
-      const { code } = req.params
+      const code = String(req.params.code)
       const data = await assetClassesService.findByCode(code)
 
       if (!data) {
