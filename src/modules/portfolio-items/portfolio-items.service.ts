@@ -4,6 +4,9 @@ import { prisma } from '../../core/prisma/prisma.service';
 const BUY_TYPES  = ['BUY', 'BONUS', 'SPLIT'];
 const SELL_TYPES = ['SELL', 'REVERSE_SPLIT'];
 
+// ID fictício que representa o portfolio consolidado (sem conta)
+const CONSOLIDATED_ACCOUNT_ID = 'consolidated';
+
 function toNum(val: unknown): number {
   if (val === null || val === undefined) return 0;
   if (typeof val === 'number') return val;
@@ -13,8 +16,8 @@ function toNum(val: unknown): number {
 function calcPositionFromTxs(
   transactions: { type: string; quantity: unknown; unitPrice: unknown }[],
 ): { quantity: number; totalCost: number; realizedPnL: number } {
-  let quantity   = 0;
-  let totalCost  = 0;
+  let quantity    = 0;
+  let totalCost   = 0;
   let realizedPnL = 0;
 
   for (const tx of transactions) {
@@ -39,16 +42,50 @@ function calcPositionFromTxs(
   return { quantity, totalCost, realizedPnL };
 }
 
+async function upsertPortfolioItem(
+  assetId: string,
+  accountId: string,
+  marketPrice: number | null,
+  transactions: { type: string; quantity: unknown; unitPrice: unknown }[],
+) {
+  const { quantity, totalCost, realizedPnL } = calcPositionFromTxs(transactions);
+  const averagePrice   = quantity > 0 ? totalCost / quantity : 0;
+  const investedAmount = quantity * averagePrice;
+  const marketValue    = marketPrice !== null ? quantity * marketPrice : 0;
+  const unrealizedPnL  = marketPrice !== null ? marketValue - investedAmount : 0;
+
+  const data = {
+    quantity:       new Prisma.Decimal(quantity),
+    averagePrice:   new Prisma.Decimal(averagePrice),
+    investedAmount: new Prisma.Decimal(investedAmount),
+    marketPrice:    marketPrice !== null ? new Prisma.Decimal(marketPrice) : null,
+    marketValue:    new Prisma.Decimal(marketValue),
+    unrealizedPnL:  new Prisma.Decimal(unrealizedPnL),
+    realizedPnL:    new Prisma.Decimal(realizedPnL),
+    lastUpdatedAt:  new Date(),
+  };
+
+  const existing = await prisma.portfolioItem.findUnique({
+    where: { assetId_accountId: { assetId, accountId } },
+  });
+
+  if (existing) {
+    return prisma.portfolioItem.update({
+      where:   { id: existing.id },
+      data,
+      include: { asset: { include: { assetClass: true } } },
+    });
+  }
+
+  return prisma.portfolioItem.create({
+    data:    { assetId, accountId, ...data },
+    include: { asset: { include: { assetClass: true } } },
+  });
+}
+
 export async function recalculatePortfolioItem(ticker: string) {
   const asset = await prisma.asset.findUnique({ where: { ticker } });
   if (!asset) throw new Error(`Ativo não encontrado: ${ticker}`);
-
-  // Busca todas as contas que têm transações desse ativo
-  const accountIds = await prisma.transaction.findMany({
-    where:   { assetId: asset.id, status: 'POSTED', accountId: { not: null } },
-    select:  { accountId: true },
-    distinct: ['accountId'],
-  });
 
   const lastPrice = await prisma.priceHistory.findFirst({
     where:   { assetId: asset.id },
@@ -56,54 +93,26 @@ export async function recalculatePortfolioItem(ticker: string) {
   });
   const marketPrice = lastPrice ? toNum(lastPrice.closePrice) : null;
 
+  const allTxs = await prisma.transaction.findMany({
+    where:   { assetId: asset.id, status: 'POSTED' },
+    orderBy: { tradeDate: 'asc' },
+  });
+
+  // Agrupa transações por conta (null vira CONSOLIDATED_ACCOUNT_ID)
+  const byAccount = new Map<string, typeof allTxs>();
+  for (const tx of allTxs) {
+    const key = tx.accountId ?? CONSOLIDATED_ACCOUNT_ID;
+    if (!byAccount.has(key)) byAccount.set(key, []);
+    byAccount.get(key)!.push(tx);
+  }
+
   const items = [];
 
-  for (const { accountId } of accountIds) {
-    if (!accountId) continue;
-
-    const transactions = await prisma.transaction.findMany({
-      where:   { assetId: asset.id, accountId, status: 'POSTED' },
-      orderBy: { tradeDate: 'asc' },
-    });
-
-    const { quantity, totalCost, realizedPnL } = calcPositionFromTxs(transactions);
-    const averagePrice   = quantity > 0 ? totalCost / quantity : 0;
-    const investedAmount = quantity * averagePrice;
-    const marketValue    = marketPrice ? quantity * marketPrice : 0;
-    const unrealizedPnL  = marketPrice ? marketValue - investedAmount : 0;
-
-    const data = {
-      quantity:       new Prisma.Decimal(quantity),
-      averagePrice:   new Prisma.Decimal(averagePrice),
-      investedAmount: new Prisma.Decimal(investedAmount),
-      marketPrice:    marketPrice !== null ? new Prisma.Decimal(marketPrice) : null,
-      marketValue:    new Prisma.Decimal(marketValue),
-      unrealizedPnL:  new Prisma.Decimal(unrealizedPnL),
-      realizedPnL:    new Prisma.Decimal(realizedPnL),
-      lastUpdatedAt:  new Date(),
-    };
-
-    const existing = await prisma.portfolioItem.findUnique({
-      where: { assetId_accountId: { assetId: asset.id, accountId } },
-    });
-
-    let item;
-    if (existing) {
-      item = await prisma.portfolioItem.update({
-        where:   { id: existing.id },
-        data,
-        include: { asset: { include: { assetClass: true } } },
-      });
-    } else {
-      item = await prisma.portfolioItem.create({
-        data:    { assetId: asset.id, accountId, ...data },
-        include: { asset: { include: { assetClass: true } } },
-      });
-    }
-
+  for (const [accountId, txs] of byAccount) {
+    const item = await upsertPortfolioItem(asset.id, accountId, marketPrice, txs);
     items.push({
       ticker,
-      accountId,
+      accountId: accountId === CONSOLIDATED_ACCOUNT_ID ? null : accountId,
       quantity:       toNum(item.quantity),
       averagePrice:   toNum(item.averagePrice),
       investedAmount: toNum(item.investedAmount),
@@ -130,8 +139,7 @@ export async function recalculateAllPortfolioItems() {
 
   for (const asset of assets) {
     try {
-      const result = await recalculatePortfolioItem(asset.ticker);
-      results.push(result);
+      results.push(await recalculatePortfolioItem(asset.ticker));
     } catch (err) {
       errors.push({ ticker: asset.ticker, error: (err as Error).message });
     }
@@ -154,7 +162,7 @@ export async function listPortfolioItems() {
     ticker:         item.asset.ticker,
     name:           item.asset.name,
     assetClass:     item.asset.assetClass.code,
-    accountId:      item.accountId,
+    accountId:      item.accountId === CONSOLIDATED_ACCOUNT_ID ? null : item.accountId,
     quantity:       toNum(item.quantity),
     averagePrice:   toNum(item.averagePrice),
     investedAmount: toNum(item.investedAmount),
