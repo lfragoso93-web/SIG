@@ -42,7 +42,7 @@ services:
       APP_PASSWORD:  ${APP_PASSWORD}
       CORS_ORIGIN:   ${CORS_ORIGIN}
     ports:
-      - "${APP_PORT}:3001"
+      - "${APP_PORT}:3000"
       - "55550:5555"
     
     networks:
