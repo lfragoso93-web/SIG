@@ -2,6 +2,8 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// A URL do banco é gerenciada pelo prisma.config.ts via process.env["DATABASE_URL"].
+// Não defina url aqui para evitar conflito com o prisma.config.ts.
 datasource db {
   provider = "postgresql"
 }
@@ -26,10 +28,7 @@ datasource db {
 /// - Ação nacional deve ser sempre DOMESTIC_STOCK.
 model AssetClass {
   id                String                   @id @default(cuid())
-  /// Código estável usado pela aplicação para regras, filtros e relatórios.
-  /// Deve seguir exatamente um dos valores documentados acima.
   code              String                   @unique @db.VarChar(50)
-  /// Nome amigável exibido na interface.
   name              String                   @unique @db.VarChar(100)
   targetPercentage  Decimal?                 @db.Decimal(7, 4)
   description       String?
@@ -81,28 +80,8 @@ model Asset {
   ticker         String                   @unique @db.VarChar(30)
   name           String                   @db.VarChar(150)
   normalizedName String?                  @db.VarChar(150)
-
-  /// Tipo instrumental/técnico do ativo.
-  ///
-  /// Exemplos:
-  /// - PETR4 -> STOCK
-  /// - VOO -> ETF
-  /// - HGLG11 -> FII
-  ///
-  /// Importante:
-  /// `assetType` não substitui `assetClass`.
-  /// A separação nacional vs internacional fica em `AssetClass.code`.
   assetType      AssetType
-
-  /// FK para a tabela AssetClass.
-  ///
-  /// Convenção esperada após a migration:
-  /// - ação nacional -> AssetClass.code = DOMESTIC_STOCK
-  /// - ação internacional -> AssetClass.code = STOCK
-  /// - ETF nacional -> AssetClass.code = ETF
-  /// - ETF internacional -> AssetClass.code = INTERNATIONAL_ETF
   assetClassId   String
-
   isin           String?                  @unique @db.VarChar(20)
   currencyCode   String                   @default("BRL") @db.VarChar(10)
   exchange       String?                  @db.VarChar(50)
@@ -287,7 +266,7 @@ model PortfolioAssetSnapshot {
 model PortfolioItem {
   id             String    @id @default(cuid())
   assetId        String
-  accountId      String?   // opcional: null = posição consolidada sem conta
+  accountId      String?
   quantity       Decimal   @default(0) @db.Decimal(20, 8)
   averagePrice   Decimal?  @db.Decimal(20, 8)
   investedAmount Decimal   @default(0) @db.Decimal(20, 2)
