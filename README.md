@@ -1,328 +1,196 @@
-# SIG — Sistema de Investimentos
+# SIG — Sistema de Gestão de Investimentos
 
-Backend de gestão de carteira de investimentos, desenvolvido em Node.js com TypeScript, Express, Prisma ORM e PostgreSQL. Integra dados de mercado via [brapi.dev](https://brapi.dev) para importação de histórico de preços e proventos de ativos da B3.
+Projeto pessoal em evolução para um sistema modular de gestão de carteira de investimentos, com visão de longo prazo para expansão em gestão financeira pessoal. A direção arquitetural mais adequada para o estágio atual é um **monólito modular**: um único sistema por enquanto, mas organizado por domínios de negócio claros, reduzindo complexidade operacional e facilitando crescimento futuro.[1][2]
 
----
+## Visão do produto
 
-## Stack
+O objetivo atual do SIG é consolidar a gestão de carteira de investimentos em um único sistema, cobrindo cadastro de ativos, transações, histórico de preços, eventos de renda, posição consolidada e snapshots da carteira.[1] A visão futura é expandir a mesma base para um sistema mais amplo de finanças pessoais, aproveitando módulos compartilhados e evitando retrabalho estrutural.[2]
 
-| Camada | Tecnologia |
-|---|---|
-| Runtime | Node.js 22 |
-| Linguagem | TypeScript 5 |
-| Framework HTTP | Express 5 |
-| ORM | Prisma 7 + adapter `pg` |
-| Banco de dados | PostgreSQL 18 |
-| Validação | Zod 3 |
-| HTTP Client | Axios 1 |
-| Infraestrutura | Docker Compose |
+## Objetivos da fase atual
 
----
+Nesta fase, o foco principal do projeto é construir um núcleo confiável de investimentos antes de abrir novas frentes funcionais. Isso significa priorizar backend, regras de negócio, integração com dados de mercado, autenticação básica e preparação para um frontend futuro.[1][3]
 
-## Status dos módulos
+Objetivos imediatos:
 
-| Módulo | Endpoints | Status |
+- Consolidar o backend modular.
+- Fechar o núcleo de investimentos.
+- Manter o Docker e o ambiente local estáveis.
+- Usar o README como guia vivo de arquitetura e progresso.
+- Preparar a base para um frontend e para expansão futura.
+
+## Stack atual
+
+A stack atual do projeto foi pensada para permitir crescimento incremental, com backend tipado, banco relacional e ambiente local reproduzível por containers. Essa combinação é coerente com projetos em amadurecimento que precisam de clareza estrutural sem a complexidade inicial de microsserviços.[1][4]
+
+| Camada | Tecnologia | Papel no sistema |
 |---|---|---|
-| `asset-classes` | CRUD completo | ✅ Validado |
-| `assets` | CRUD completo | ✅ Validado |
-| `transactions` | CRUD completo | ✅ Validado |
-| `income-events` | CRUD + import por ticker + import em lote | ✅ Validado |
-| `price-history` | Import por ticker + import em lote | ✅ Validado |
-| `portfolio-items` | Recalculo por ticker + recalculo total | ✅ Validado |
-| `portfolio-snapshots` | Fotografia periódica | 🔲 Pendente |
+| Backend | Node.js + Express + TypeScript | API, regras de negócio e organização modular |
+| ORM | Prisma | Acesso ao banco e modelagem de dados |
+| Banco | PostgreSQL | Persistência dos dados |
+| Infra local | Docker Compose | Ambiente de desenvolvimento com API e banco |
+| Validação | Zod | Validação de payloads e entradas |
+| Integrações | Brapi e fontes externas | Preços, históricos e eventos de mercado |
+| Futuro frontend | Ainda em definição | Camada visual do produto |
 
----
+## Arquitetura modular
 
-## Estrutura do projeto
+A arquitetura do SIG deve ser guiada por domínios, e não por telas isoladas ou por endpoints soltos. A melhor forma de evoluir o sistema agora é separar claramente aquilo que é base da plataforma, aquilo que pertence ao domínio de investimentos e aquilo que será o domínio futuro de finanças pessoais.[1][2]
 
-```
+### 1. Base do sistema
+
+Esses módulos sustentam qualquer área do produto e devem ser reutilizados por investimentos e por finanças pessoais.
+
+- `auth`: login, emissão e validação de token.
+- `users`: usuários do sistema, perfis e preferências.
+- `settings`: parâmetros globais do sistema.
+- `institutions`: corretoras, bancos e instituições financeiras.
+- `accounts`: contas de investimento, contas bancárias e futuras carteiras financeiras.
+- `shared`: erros, middlewares, utilitários, constantes e helpers reutilizáveis.
+- `core`: bootstrap do servidor, configuração e Prisma.
+
+### 2. Domínio de investimentos
+
+Esse é o núcleo atual do produto e deve permanecer como foco principal nas próximas etapas.
+
+- `asset-classes`: classes de ativos.
+- `assets`: cadastro e metadados dos ativos.
+- `transactions`: compras, vendas e movimentações.
+- `price-history`: histórico de preços.
+- `income-events`: dividendos, juros, rendimentos e proventos.
+- `portfolio-items`: posição consolidada por ativo.
+- `portfolio-snapshots`: fotografia da carteira por data.
+
+### 3. Domínio futuro de finanças pessoais
+
+Esses módulos ainda não são prioridade imediata, mas já devem ser previstos no desenho para evitar acoplamento indevido.
+
+- `categories`: categorias financeiras.
+- `cash-transactions`: receitas, despesas e transferências.
+- `budgets`: orçamento mensal.
+- `recurring-payments`: lançamentos recorrentes.
+- `cards`: cartões e faturas.
+- `reports`: relatórios consolidados de vida financeira.
+- `goals`: metas financeiras e planejamento.
+
+## Estrutura sugerida de pastas
+
+A estrutura abaixo mantém o projeto simples para o estágio atual e, ao mesmo tempo, organizada o suficiente para crescer sem virar um bloco confuso.[1][4]
+
+```text
 src/
-├── core/
-│   └── prisma/
-│       └── prisma.service.ts          # Singleton do PrismaClient com adapter pg
-├── modules/
-│   ├── asset-classes/                 # Classificação macro dos ativos
-│   ├── assets/                        # Cadastro de ativos (ticker, tipo, classe)
-│   ├── transactions/                  # Compras, vendas, aportes e resgates
-│   ├── income-events/                 # Proventos: dividendos, JCP, FII income
-│   │   ├── income-events.schema.ts
-│   │   ├── income-events.service.ts
-│   │   ├── income-events.controller.ts
-│   │   └── income-events.routes.ts
-│   ├── price-history/                 # Histórico de preços importado via brapi
-│   │   ├── price-history.schema.ts
-│   │   ├── price-history.service.ts
-│   │   ├── price-history.controller.ts
-│   │   └── price-history.routes.ts
-│   └── portfolio-items/               # Posição atual consolidada por ativo
-│       ├── portfolio-items.service.ts
-│       └── portfolio-items.controller.ts
-├── providers/
-│   └── brapi/
-│       └── brapi.client.ts            # Cliente HTTP para a API brapi.dev
-└── index.ts                           # Entry point — Express app
-prisma/
-└── schema.prisma                      # Modelos Prisma
+  core/
+    prisma/
+    config/
+    server/
+  shared/
+    errors/
+    middleware/
+    utils/
+    constants/
+  modules/
+    auth/
+    users/
+    settings/
+    institutions/
+    accounts/
+    asset-classes/
+    assets/
+    transactions/
+    price-history/
+    income-events/
+    portfolio-items/
+    portfolio-snapshots/
+    categories/           # futuro
+    cash-transactions/    # futuro
+    budgets/              # futuro
+    reports/              # futuro
 ```
 
----
+## Estado atual do sistema
 
-## Modelos de dados principais
+O projeto já possui uma base backend funcional, com ambiente Docker ativo, build validado e rotas principais de investimentos sendo organizadas por módulo. O sistema já demonstrou responder ao health check e já possui evolução recente em tratamento de erros, autenticação e ajustes de infraestrutura.[3][5]
 
-| Modelo | Descrição |
-|---|---|
-| `AssetClass` | Classificação macro: `DOMESTIC_STOCK`, `ETF`, `FII`, `BDR`, `CRYPTO`, `FIXED_INCOME`, `TREASURY`, `CASH` |
-| `Asset` | Ativo individual com ticker, tipo (`AssetType`), classe e moeda |
-| `Transaction` | Operações: `BUY`, `SELL`, `DEPOSIT`, `WITHDRAW`, `SPLIT`, etc. |
-| `IncomeEvent` | Proventos: `DIVIDEND`, `JCP`, `FII_INCOME`, `COUPON`, etc. |
-| `PriceHistory` | Histórico OHLC diário por ativo, com `@@unique([assetId, priceDate])` |
-| `PortfolioItem` | Posição atual consolidada por ativo (accountId opcional) |
-| `PortfolioSnapshot` | Fotografia periódica da carteira (diária, mensal, anual) |
-| `AllocationTarget` | Metas de alocação por classe com vigência temporal |
+### Módulos atuais
 
----
+| Módulo | Status | Observação |
+|---|---|---|
+| `auth` | Em andamento | Rota de login existente, mas fluxo de usuário inicial ainda precisa ser definido |
+| `asset-classes` | Funcional | Base para classificação dos ativos |
+| `assets` | Funcional | Cadastro e consulta de ativos já estruturados |
+| `transactions` | Funcional | CRUD principal construído |
+| `price-history` | Em andamento | Estrutura montada e integração em evolução |
+| `income-events` | Em andamento | Módulo existente, ainda em consolidação |
+| `portfolio-items` | Em andamento | Recalculo e consolidação em evolução |
+| `portfolio-snapshots` | Em andamento | Preparando base para visão temporal da carteira |
+| `users` | Planejado | Ainda não implementado |
+| `accounts` | Planejado | Importante para evolução futura |
+| `cash-transactions` | Planejado | Parte do domínio futuro de finanças pessoais |
+| `budgets` | Planejado | Parte do domínio futuro de finanças pessoais |
 
-## Configuração
+## Decisões arquiteturais atuais
 
-### Pré-requisitos
+Algumas decisões devem orientar o projeto daqui para frente para reduzir retrabalho.
 
-- Docker Desktop com WSL2 habilitado
-- Git
+- O SIG continuará como **monólito modular** nesta fase.[1][2]
+- O foco imediato permanece no **domínio de investimentos**.[3]
+- A autenticação deve ser simples no começo, mas já preparada para crescimento.
+- O frontend será construído depois que o núcleo backend estiver mais estável.
+- O domínio de finanças pessoais será adicionado como expansão, não como mistura precoce com investimentos.
 
-### Variáveis de ambiente
+## Roadmap recomendado
 
-Crie um arquivo `.env` na raiz do projeto:
+A ordem das entregas importa bastante para manter o projeto sob controle. O caminho mais seguro é evoluir por blocos de valor, fechando primeiro a base técnica e o núcleo funcional antes de abrir novos domínios.[5][3]
 
-```env
-# Banco de dados
-POSTGRES_DB=sig
-POSTGRES_PASSWORD=postgres
-APP_DB_USER=app
-APP_DB_PASSWORD=app123
-DB_PORT=54320
+### Fase 1 — Base técnica
 
-# App
-APP_PORT=3001
-DATABASE_URL=postgresql://app:app123@db:5432/sig
+- Estabilizar Docker e fluxo local.
+- Consolidar tratamento de erros.
+- Padronizar validações com Zod.
+- Fechar o fluxo mínimo de autenticação.
+- Manter CI rodando no GitHub Actions.
 
-# Docker
-POSTGRES_VOLUME_NAME=sig_postgres_data
-DOCKER_NETWORK_NAME=sig_network
+### Fase 2 — Núcleo de investimentos
 
-# brapi.dev (opcional — necessário para planos pagos)
-BRAPI_TOKEN=seu_token_aqui
-```
+- Fechar `price-history`.
+- Fechar `income-events`.
+- Consolidar `portfolio-items`.
+- Consolidar `portfolio-snapshots`.
+- Validar regras de cálculo da carteira.
 
-> A porta `DB_PORT` usa `54320` para evitar conflito com ranges reservados pelo Hyper-V/WSL2 no Windows.
+### Fase 3 — Experiência do produto
 
-### Subindo o ambiente
+- Definir frontend inicial.
+- Criar dashboard principal.
+- Criar telas de ativos, transações e posição.
+- Integrar autenticação no frontend.
 
-```bash
-# Primeira vez — criar rede e volume externos
-docker network create sig_network
-docker volume create sig_postgres_data
+### Fase 4 — Módulos compartilhados
 
-# Subir containers
-docker compose up --build
+- Criar `users`.
+- Criar `accounts`.
+- Criar `settings` e preferências.
+- Preparar base de categorias e relatórios.
 
-# Aplicar migrations do Prisma (em outro terminal)
-docker compose exec app npx prisma migrate deploy
+### Fase 5 — Finanças pessoais
 
-# Popular dados de referência (seed)
-docker compose exec app npm run seed
-```
+- Implementar receitas e despesas.
+- Implementar orçamento mensal.
+- Implementar recorrências.
+- Implementar relatórios financeiros pessoais.
+- Integrar visão patrimonial total com investimentos.
 
-### Após alterar o schema Prisma
+## Como usar este README
 
-Sempre que o `schema.prisma` for alterado, regenere o client dentro do container antes de reiniciar:
+Este README deve funcionar como documento vivo do projeto. Sempre que um módulo mudar de estado, uma decisão arquitetural for tomada ou uma fase for concluída, o ideal é atualizar este arquivo para manter clareza técnica e continuidade do desenvolvimento.[6][7]
 
-```bash
-docker compose exec app npx prisma generate
-docker compose restart app
-```
-
----
-
-## Endpoints disponíveis
-
-### Health
-
-```
-GET /health
-```
-
-### Asset Classes
-
-```
-GET    /asset-classes
-POST   /asset-classes
-GET    /asset-classes/:id
-PATCH  /asset-classes/:id
-DELETE /asset-classes/:id
-```
-
-### Assets
-
-```
-GET    /assets
-POST   /assets
-GET    /assets/:id
-PATCH  /assets/:id
-DELETE /assets/:id
-```
-
-### Transactions
-
-```
-GET    /transactions
-POST   /transactions
-GET    /transactions/:id
-PATCH  /transactions/:id
-DELETE /transactions/:id
-```
-
-O campo `accountId` é opcional — a gestão da carteira é orientada ao ativo, não à corretora.
-
-### Income Events
-
-```
-GET    /income-events
-POST   /income-events
-GET    /income-events/:id
-PATCH  /income-events/:id
-DELETE /income-events/:id
-
-POST   /income-events/import/:ticker
-POST   /income-events/import-batch
-```
-
-**import/:ticker — Resposta:**
-```json
-{ "ticker": "PETR4", "inserted": 60, "skipped": 0, "total": 60 }
-```
-
-**import-batch — Body:**
-```json
-{ "tickers": ["PETR4", "VALE3", "HGLG11"] }
-```
-> Se `tickers` for omitido ou vazio, importa todos os ativos ativos do banco.
-
-**import-batch — Resposta:**
-```json
-{
-  "summary": { "total": 180, "inserted": 120, "skipped": 60, "errors": 0 },
-  "results": [
-    { "ticker": "PETR4", "inserted": 60, "skipped": 0, "total": 60 },
-    { "ticker": "VALE3", "inserted": 45, "skipped": 15, "total": 60 }
-  ]
-}
-```
-
-### Price History
-
-```
-POST /price-history/import/:ticker
-POST /price-history/import-batch
-```
-
-**import/:ticker — Body (range):**
-```json
-{ "range": "5y", "interval": "1d" }
-```
-
-**import/:ticker — Body (datas explícitas):**
-```json
-{ "startDate": "2024-01-01", "endDate": "2024-12-31", "interval": "1d" }
-```
-
-**import-batch — Body:**
-```json
-{ "tickers": ["PETR4", "VALE3"], "range": "5y", "interval": "1d" }
-```
-> Se `tickers` for omitido ou vazio, importa histórico de todos os ativos ativos.
-
-**import-batch — Resposta:**
-```json
-{
-  "summary": { "total": 2496, "inserted": 1996, "skipped": 500, "errors": 0 },
-  "results": [
-    { "ticker": "PETR4", "inserted": 998, "skipped": 250, "total": 1248 },
-    { "ticker": "VALE3", "inserted": 998, "skipped": 250, "total": 1248 }
-  ]
-}
-```
-
-### Portfolio Items
-
-```
-GET  /portfolio-items
-POST /portfolio-items/recalculate/:ticker
-POST /portfolio-items/recalculate
-```
-
-**recalculate/:ticker — Resposta:**
-```json
-{
-  "ticker": "PETR4",
-  "accounts": 1,
-  "items": [{
-    "accountId": null,
-    "quantity": 100,
-    "averagePrice": 36.5,
-    "investedAmount": 3650,
-    "marketPrice": 44.6,
-    "marketValue": 4460,
-    "unrealizedPnL": 810,
-    "realizedPnL": 0
-  }]
-}
-```
-
----
-
-## Integração brapi.dev
-
-O cliente `BrapiClient` em `src/providers/brapi/brapi.client.ts` consome a [brapi.dev](https://brapi.dev/docs/acoes), suportando:
-
-- `range`: janela temporal pré-definida (`1d`, `1mo`, `1y`, `5y`, `max`, etc.)
-- `startDate` + `endDate`: intervalo personalizado no formato `YYYY-MM-DD`
-- `interval`: granularidade dos candles (`1d`, `1wk`, `1mo`, etc.)
-- `dividends=true`: proventos históricos por ticker
-
-O token de autenticação é lido da variável `BRAPI_TOKEN`. Se não definido, a API é consumida no plano gratuito.
-
----
-
-## Convenções de código
-
-- **Padrão de módulo:** `schema.ts` (Zod) → `service.ts` → `controller.ts` → `routes.ts`
-- **Exports nomeados** em todos os arquivos (`export const`)
-- **Prisma singleton** via `globalThis` em `src/core/prisma/prisma.service.ts`
-- **Validação na borda:** Zod valida todos os inputs antes de chegar ao service
-
----
-
-## Decisões de domínio
-
-### Classificação de ativos
-
-`assetType` representa o tipo técnico do instrumento. A distinção entre nacional e internacional fica em `AssetClass.code` — por exemplo, ação nacional usa `DOMESTIC_STOCK` e ação internacional usa `STOCK`.
-
-### Transactions orientadas ao ativo
-
-O `accountId` em `Transaction` e `PortfolioItem` é opcional porque a gestão da carteira é orientada ao ativo, não à corretora. Isso permite registrar operações sem vínculo obrigatório com uma conta/custodiante.
-
-### Import idempotente
-
-Todos os endpoints de importação usam `skipDuplicates: true` no Prisma e `externalId` como chave de deduplicação, permitindo que o mesmo import seja reexecutado sem efeitos colaterais.
-
-### Import em lote
-
-Os endpoints `import-batch` de `price-history` e `income-events` processam os tickers **sequencialmente** (não em paralelo) para não sobrecarregar a API brapi.dev. Erros em um ticker são capturados individualmente e reportados no campo `error` do resultado, sem interromper o restante do lote.
-
----
-
-## Próximos passos
-
-- [ ] `portfolio-snapshots` — fotografia periódica da carteira
-- [ ] Autenticação e controle de acesso
+Checklist de atualização recomendada:
+
+- Atualizar status dos módulos.
+- Registrar novos módulos criados.
+- Ajustar roadmap quando a prioridade mudar.
+- Registrar mudanças importantes na stack.
+- Manter instruções de ambiente atualizadas.
+
+## Próximo passo recomendado
+
+O próximo passo mais coerente com a fase atual do SIG é consolidar o núcleo de investimentos antes de abrir a frente de usuários, frontend ou finanças pessoais. Em termos práticos, isso significa priorizar a conclusão de `price-history`, `income-events`, `portfolio-items` e `portfolio-snapshots`, pois esses módulos fecham a lógica central da carteira e sustentam o valor do produto desde já.[1][2]
