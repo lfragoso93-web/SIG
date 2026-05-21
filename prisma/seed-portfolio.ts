@@ -6,7 +6,7 @@
  * Execucao:
  *   docker compose exec app npx ts-node prisma/seed-portfolio.ts
  */
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, AssetType } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool } from 'pg'
 
@@ -14,66 +14,67 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL })
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) })
 
 // ---------------------------------------------------------------------------
-// 1. Mapa de ativos: ticker -> { name, assetClassCode, assetType }
+// 1. Mapa de ativos: ticker -> { name, classCode, assetType }
+//    AssetType válidos: STOCK | FII | ETF | BDR | CRYPTO | BOND | FUND | CASH | OTHER
 // ---------------------------------------------------------------------------
-const ASSETS: Record<string, { name: string; classCode: string; type: string }> = {
+const ASSETS: Record<string, { name: string; classCode: string; type: AssetType }> = {
   // FIIs
-  MXRF11: { name: 'Maxi Renda',                   classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  SNEL11: { name: 'Sinqia Energy',                classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  GARE11: { name: 'Guardian Real Estate',         classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  RBRF11: { name: 'RBR Alpha Fundo',              classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  ARXD11: { name: 'Arx Elbrus',                   classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  VGHF11: { name: 'Valora Hedge Fund',            classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  XPML11: { name: 'XP Malls',                     classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  VINO11: { name: 'Vinci Offices',                classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  SNAG11: { name: 'Suno Agro',                    classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  ALZC11: { name: 'Alianza Cemig',                classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  CPTS11: { name: 'Capitania Securities',         classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  AAZQ11: { name: 'Alianza Ativos',               classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  VIUR11: { name: 'Vinci Urbano',                 classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  RBRX11: { name: 'RBR e-Commerce',               classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  VCRA11: { name: 'Vectis CRA',                   classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  XPCA11: { name: 'XP Credito Agro',              classCode: 'FII', type: 'REAL_ESTATE_FUND' },
+  MXRF11: { name: 'Maxi Renda',                     classCode: 'FII',            type: AssetType.FII   },
+  SNEL11: { name: 'Sinqia Energy',                  classCode: 'FII',            type: AssetType.FII   },
+  GARE11: { name: 'Guardian Real Estate',           classCode: 'FII',            type: AssetType.FII   },
+  RBRF11: { name: 'RBR Alpha Fundo',                classCode: 'FII',            type: AssetType.FII   },
+  ARXD11: { name: 'Arx Elbrus',                     classCode: 'FII',            type: AssetType.FII   },
+  VGHF11: { name: 'Valora Hedge Fund',              classCode: 'FII',            type: AssetType.FII   },
+  XPML11: { name: 'XP Malls',                       classCode: 'FII',            type: AssetType.FII   },
+  VINO11: { name: 'Vinci Offices',                  classCode: 'FII',            type: AssetType.FII   },
+  SNAG11: { name: 'Suno Agro',                      classCode: 'FII',            type: AssetType.FII   },
+  ALZC11: { name: 'Alianza Cemig',                  classCode: 'FII',            type: AssetType.FII   },
+  CPTS11: { name: 'Capitania Securities',           classCode: 'FII',            type: AssetType.FII   },
+  AAZQ11: { name: 'Alianza Ativos',                 classCode: 'FII',            type: AssetType.FII   },
+  VIUR11: { name: 'Vinci Urbano',                   classCode: 'FII',            type: AssetType.FII   },
+  RBRX11: { name: 'RBR e-Commerce',                 classCode: 'FII',            type: AssetType.FII   },
+  VCRA11: { name: 'Vectis CRA',                     classCode: 'FII',            type: AssetType.FII   },
+  XPCA11: { name: 'XP Credito Agro',                classCode: 'FII',            type: AssetType.FII   },
   // ETFs
-  DIVD11: { name: 'SPDR S&P Dividends ETF',       classCode: 'ETF', type: 'ETF' },
-  COIN11: { name: 'Hashdex Nasdaq Crypto',         classCode: 'ETF', type: 'ETF' },
-  QQQI11: { name: 'Invesco QQQ Innovation',        classCode: 'ETF', type: 'ETF' },
-  AREA11: { name: 'iShares Real Estate',           classCode: 'ETF', type: 'ETF' },
-  AURO11: { name: 'iShares Gold',                  classCode: 'ETF', type: 'ETF' },
+  DIVD11: { name: 'SPDR S&P Dividends ETF',         classCode: 'ETF',            type: AssetType.ETF   },
+  COIN11: { name: 'Hashdex Nasdaq Crypto',           classCode: 'ETF',            type: AssetType.ETF   },
+  QQQI11: { name: 'Invesco QQQ Innovation',          classCode: 'ETF',            type: AssetType.ETF   },
+  AREA11: { name: 'iShares Real Estate',             classCode: 'ETF',            type: AssetType.ETF   },
+  AURO11: { name: 'iShares Gold',                    classCode: 'ETF',            type: AssetType.ETF   },
   // BDRs
-  NIKE34: { name: 'Nike BDR',                      classCode: 'BDR', type: 'BDR' },
-  NVDC34: { name: 'Nvidia BDR',                    classCode: 'BDR', type: 'BDR' },
-  E1CO34: { name: 'Ecolab BDR',                    classCode: 'BDR', type: 'BDR' },
+  NIKE34: { name: 'Nike BDR',                        classCode: 'BDR',            type: AssetType.BDR   },
+  NVDC34: { name: 'Nvidia BDR',                      classCode: 'BDR',            type: AssetType.BDR   },
+  E1CO34: { name: 'Ecolab BDR',                      classCode: 'BDR',            type: AssetType.BDR   },
   // Ações nacionais
-  PETR4:  { name: 'Petrobras PN',                  classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  JHSF3:  { name: 'JHSF Participações',           classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  ITSA4:  { name: 'Itausa PN',                     classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  AMOB3:  { name: 'Amob Tecnologia',               classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  RANI3:  { name: 'Irani Papel e Embalagem',       classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  POMO4:  { name: 'Marcopolo PN',                  classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  PETZ3:  { name: 'Petz',                          classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  FIQE3:  { name: 'Fique Bem Agro',                classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  ALOS3:  { name: 'Allos',                         classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  BRBI11: { name: 'BR Advisory Partners',          classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  KLBN4:  { name: 'Klabin PN',                     classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  BMGB4:  { name: 'Banco BMG PN',                  classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  TAEE11: { name: 'Transmissora Aliança de Energia', classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  ALUP11: { name: 'Alupar Investimento',           classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  GOAU4:  { name: 'Metalurgica Gerdau PN',         classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  CXSE3:  { name: 'Caixa Seguridade',              classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  BBAS3:  { name: 'Banco do Brasil ON',            classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  KLBN11: { name: 'Klabin Units',                  classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  MTRE3:  { name: 'Mitre Realty',                  classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  MELK3:  { name: 'Méliuz',                         classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  BBDC3:  { name: 'Bradesco ON',                   classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  VULC3:  { name: 'Vulcabras',                     classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  SANB11: { name: 'Santander Brasil Units',        classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  EGIE3:  { name: 'Engie Brasil Energia',          classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
-  WEGE3:  { name: 'Weg',                           classCode: 'DOMESTIC_STOCK', type: 'STOCK' },
+  PETR4:  { name: 'Petrobras PN',                    classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  JHSF3:  { name: 'JHSF Participações',             classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  ITSA4:  { name: 'Itausa PN',                       classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  AMOB3:  { name: 'Amob Tecnologia',                 classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  RANI3:  { name: 'Irani Papel e Embalagem',         classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  POMO4:  { name: 'Marcopolo PN',                    classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  PETZ3:  { name: 'Petz',                            classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  FIQE3:  { name: 'Fique Bem Agro',                  classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  ALOS3:  { name: 'Allos',                           classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  BRBI11: { name: 'BR Advisory Partners',            classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  KLBN4:  { name: 'Klabin PN',                       classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  BMGB4:  { name: 'Banco BMG PN',                    classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  TAEE11: { name: 'Transmissora Aliança de Energia', classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  ALUP11: { name: 'Alupar Investimento',             classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  GOAU4:  { name: 'Metalurgica Gerdau PN',           classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  CXSE3:  { name: 'Caixa Seguridade',                classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  BBAS3:  { name: 'Banco do Brasil ON',              classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  KLBN11: { name: 'Klabin Units',                    classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  MTRE3:  { name: 'Mitre Realty',                    classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  MELK3:  { name: 'Méliuz',                           classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  BBDC3:  { name: 'Bradesco ON',                     classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  VULC3:  { name: 'Vulcabras',                       classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  SANB11: { name: 'Santander Brasil Units',          classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  EGIE3:  { name: 'Engie Brasil Energia',            classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
+  WEGE3:  { name: 'Weg',                             classCode: 'DOMESTIC_STOCK', type: AssetType.STOCK },
 }
 
 // ---------------------------------------------------------------------------
-// 2. Transacões (YYYY-MM-DD, preço como number)
+// 2. Transacões
 // ---------------------------------------------------------------------------
 type TxRow = { ticker: string; date: string; price: number; qty: number }
 
@@ -273,7 +274,6 @@ const TRANSACTIONS: TxRow[] = [
 // 3. Main
 // ---------------------------------------------------------------------------
 async function main() {
-  // Busca IDs de classes
   const classCodes = [...new Set(Object.values(ASSETS).map((a) => a.classCode))]
   const classRows  = await prisma.assetClass.findMany({ where: { code: { in: classCodes } } })
   const classMap   = new Map(classRows.map((c) => [c.code, c.id]))
@@ -282,7 +282,6 @@ async function main() {
     if (!classMap.has(code)) throw new Error(`AssetClass "${code}" não encontrada. Rode o seed principal primeiro.`)
   }
 
-  // Upsert dos ativos
   console.log('Cadastrando ativos...')
   for (const [ticker, meta] of Object.entries(ASSETS)) {
     await prisma.asset.upsert({
@@ -291,7 +290,7 @@ async function main() {
       create: {
         ticker,
         name:         meta.name,
-        assetType:    meta.type as any,
+        assetType:    meta.type,
         assetClassId: classMap.get(meta.classCode)!,
         currencyCode: 'BRL',
         isActive:     true,
@@ -300,26 +299,23 @@ async function main() {
   }
   console.log(`${Object.keys(ASSETS).length} ativos cadastrados.`)
 
-  // Busca IDs dos ativos recém-inseridos
   const assetRows = await prisma.asset.findMany({ where: { ticker: { in: Object.keys(ASSETS) } } })
   const assetMap  = new Map(assetRows.map((a) => [a.ticker, a.id]))
 
-  // Insere transacões
   console.log('Inserindo transações...')
   const txData = TRANSACTIONS.map((t) => {
-    const gross = t.qty * t.price
+    const gross = Math.round(t.qty * t.price * 100) / 100
     return {
-      assetId:     assetMap.get(t.ticker)!,
-      type:        'BUY' as const,
-      status:      'POSTED' as const,
-      tradeDate:   new Date(t.date),
-      settleDate:  new Date(t.date),
-      quantity:    t.qty,
-      unitPrice:   t.price,
-      grossAmount: gross,
-      totalValue:  gross,
-      fees:        0,
-      currencyCode: 'BRL',
+      assetId:        assetMap.get(t.ticker)!,
+      type:           'BUY'    as const,
+      status:         'POSTED' as const,
+      tradeDate:      new Date(t.date),
+      settlementDate: new Date(t.date),
+      quantity:       t.qty,
+      unitPrice:      t.price,
+      grossAmount:    gross,
+      fees:           0,
+      currencyCode:   'BRL',
     }
   })
 
