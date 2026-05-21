@@ -30,7 +30,7 @@ const ASSETS: Record<string, { name: string; classCode: string; type: string }> 
   ALZC11: { name: 'Alianza Cemig',                classCode: 'FII', type: 'REAL_ESTATE_FUND' },
   CPTS11: { name: 'Capitania Securities',         classCode: 'FII', type: 'REAL_ESTATE_FUND' },
   AAZQ11: { name: 'Alianza Ativos',               classCode: 'FII', type: 'REAL_ESTATE_FUND' },
-  VIUR11: { name: 'Vinci Urbaão',                 classCode: 'FII', type: 'REAL_ESTATE_FUND' },
+  VIUR11: { name: 'Vinci Urbano',                 classCode: 'FII', type: 'REAL_ESTATE_FUND' },
   RBRX11: { name: 'RBR e-Commerce',               classCode: 'FII', type: 'REAL_ESTATE_FUND' },
   VCRA11: { name: 'Vectis CRA',                   classCode: 'FII', type: 'REAL_ESTATE_FUND' },
   XPCA11: { name: 'XP Credito Agro',              classCode: 'FII', type: 'REAL_ESTATE_FUND' },
@@ -73,7 +73,7 @@ const ASSETS: Record<string, { name: string; classCode: string; type: string }> 
 }
 
 // ---------------------------------------------------------------------------
-// 2. Transacões (DD/MM/YYYY -> Date, preço como string -> Decimal)
+// 2. Transacões (YYYY-MM-DD, preço como number)
 // ---------------------------------------------------------------------------
 type TxRow = { ticker: string; date: string; price: number; qty: number }
 
@@ -306,18 +306,22 @@ async function main() {
 
   // Insere transacões
   console.log('Inserindo transações...')
-  const txData = TRANSACTIONS.map((t) => ({
-    assetId:    assetMap.get(t.ticker)!,
-    type:       'BUY' as const,
-    status:     'POSTED' as const,
-    tradeDate:  new Date(t.date),
-    settleDate: new Date(t.date),
-    quantity:   t.qty,
-    unitPrice:  t.price,
-    totalValue: t.qty * t.price,
-    fees:       0,
-    currencyCode: 'BRL',
-  }))
+  const txData = TRANSACTIONS.map((t) => {
+    const gross = t.qty * t.price
+    return {
+      assetId:     assetMap.get(t.ticker)!,
+      type:        'BUY' as const,
+      status:      'POSTED' as const,
+      tradeDate:   new Date(t.date),
+      settleDate:  new Date(t.date),
+      quantity:    t.qty,
+      unitPrice:   t.price,
+      grossAmount: gross,
+      totalValue:  gross,
+      fees:        0,
+      currencyCode: 'BRL',
+    }
+  })
 
   const result = await prisma.transaction.createMany({ data: txData, skipDuplicates: false })
   console.log(`${result.count} transações inseridas.`)
