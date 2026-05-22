@@ -1,5 +1,4 @@
 import { prisma } from '../../core/prisma/prisma.service'
-import { AppError } from '../../core/errors/app-error'
 
 export class AssetClassesService {
   async listAll() {
@@ -42,7 +41,9 @@ export class AssetClassesService {
     const assetClass = await prisma.assetClass.findUnique({ where: { code } })
 
     if (!assetClass) {
-      throw new AppError(`Classe de ativo não encontrada: ${code}`, 404)
+      const error = new Error(`Classe de ativo não encontrada: ${code}`) as Error & { statusCode?: number }
+      error.statusCode = 404
+      throw error
     }
 
     return prisma.assetClass.update({
