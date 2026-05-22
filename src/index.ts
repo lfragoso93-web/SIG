@@ -13,6 +13,7 @@ import { portfolioSnapshotsRouter } from './modules/portfolio-snapshots/portfoli
 import { authenticate }            from './shared/middleware/authenticate'
 import { errorHandler }            from './shared/middleware/errorHandler'
 import { allocationRouter } from './modules/allocation/allocation.routes'
+import { performanceRouter } from './modules/performance/performance.routes'
 
 const app  = express()
 const PORT = Number(process.env.PORT ?? 3001)
@@ -38,6 +39,7 @@ app.use('/income-events',        authenticate, incomeEventsRouter)
 app.use('/portfolio-items',      authenticate, portfolioItemsRouter)
 app.use('/portfolio-snapshots',  authenticate, portfolioSnapshotsRouter)
 app.use('/allocation',           authenticate, allocationRouter)
+app.use('/performance',          authenticate, performanceRouter)
 
 // ── Middleware centralizado de erros (deve ficar APÓS as rotas) ──────────────
 app.use(errorHandler)
