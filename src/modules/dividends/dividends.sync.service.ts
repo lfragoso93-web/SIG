@@ -16,13 +16,10 @@ interface YahooDividend {
 }
 
 async function fetchDividendsFromYahoo(ticker: string): Promise<YahooDividend[]> {
-  // B3 tickers precisam do sufixo .SA
   const symbol = ticker.endsWith('.SA') ? ticker : `${ticker}.SA`
-  const url = `${YAHOO_BASE}/${symbol}?events=dividends&range=30y&interval=1mo`
+  const url    = `${YAHOO_BASE}/${symbol}?events=dividends&range=30y&interval=1mo`
 
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' },
-  })
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
   if (!res.ok) throw new Error(`Yahoo Finance HTTP ${res.status} para ${ticker}`)
 
   const json = await res.json() as {
@@ -32,12 +29,30 @@ async function fetchDividendsFromYahoo(ticker: string): Promise<YahooDividend[]>
     }
   }
 
-  if (json.chart?.error) {
-    throw new Error(`Yahoo Finance erro: ${json.chart.error.description}`)
-  }
+  if (json.chart?.error) throw new Error(`Yahoo Finance: ${json.chart.error.description}`)
 
   const divMap = json.chart?.result?.[0]?.events?.dividends ?? {}
   return Object.values(divMap)
+}
+
+/**
+ * Calcula a quantidade acumulada de um ativo ate uma data (exclusive)
+ * somando BUY e subtraindo SELL.
+ */
+async function quantityAtDate(assetId: string, date: Date): Promise<number> {
+  const txs = await prisma.transaction.findMany({
+    where: {
+      assetId,
+      tradeDate: { lt: date },
+      type:      { in: ['BUY', 'SELL'] },
+    },
+    select: { type: true, quantity: true },
+  })
+
+  return txs.reduce((sum, tx) => {
+    const q = toNum(tx.quantity)
+    return tx.type === 'BUY' ? sum + q : sum - q
+  }, 0)
 }
 
 export interface SyncResult {
@@ -51,14 +66,13 @@ export interface SyncResult {
 export async function syncDividendsForTicker(ticker: string): Promise<SyncResult> {
   const result: SyncResult = { ticker, total: 0, updated: 0, notFound: 0, errors: [] }
 
-  // Busca apenas IncomeEvents sem valor
   const events = await prisma.incomeEvent.findMany({
     where: {
       asset:       { ticker },
       grossAmount: null,
       status:      { not: 'CANCELED' },
     },
-    select: { id: true, paymentDate: true },
+    select: { id: true, paymentDate: true, assetId: true },
   })
 
   result.total = events.length
@@ -77,22 +91,21 @@ export async function syncDividendsForTicker(ticker: string): Promise<SyncResult
 
     const eventMs = new Date(event.paymentDate).getTime()
 
-    // Encontra o dividendo do Yahoo mais próximo pela data (tolerância de 4 dias)
     const match = yahooDividends
       .map((d) => ({ d, diff: Math.abs(d.date * 1000 - eventMs) }))
       .filter(({ diff }) => diff <= TOLERANCE_MS)
       .sort((a, b) => a.diff - b.diff)[0]
 
-    if (!match || match.d.amount === 0) {
-      result.notFound++
-      continue
-    }
+    if (!match || match.d.amount === 0) { result.notFound++; continue }
 
-    const grossAmount = match.d.amount
+    const rate     = match.d.amount
+    // Quantidade possuida na data de pagamento
+    const qty      = await quantityAtDate(event.assetId, new Date(event.paymentDate))
+    const grossAmt = qty > 0 ? Number((rate * qty).toFixed(2)) : Number(rate.toFixed(6))
 
     await prisma.incomeEvent.update({
       where: { id: event.id },
-      data:  { grossAmount, netAmount: grossAmount },
+      data:  { grossAmount: grossAmt, netAmount: grossAmt },
     })
 
     result.updated++
@@ -112,8 +125,7 @@ export async function syncAllDividends(): Promise<SyncResult[]> {
   const results: SyncResult[] = []
 
   for (const ticker of tickers) {
-    const r = await syncDividendsForTicker(ticker)
-    results.push(r)
+    results.push(await syncDividendsForTicker(ticker))
     await new Promise((res) => setTimeout(res, 300))
   }
 
