@@ -1,38 +1,31 @@
 import { Request, Response } from 'express'
 import { AssetClassesService } from './asset-classes.service'
+import { updateAssetClassSchema } from './asset-classes.schema'
+import { AppError } from '../../core/errors/app-error'
 
 const assetClassesService = new AssetClassesService()
 
 export class AssetClassesController {
   async listAll(req: Request, res: Response) {
-    try {
-      const data = await assetClassesService.listAll()
-      return res.status(200).json(data)
-    } catch (error) {
-      console.error('Erro ao listar classes de ativos:', error)
-      return res.status(500).json({
-        message: 'Erro interno ao listar classes de ativos.',
-      })
-    }
+    const classes = await assetClassesService.listAll()
+    res.json(classes)
   }
 
   async findByCode(req: Request, res: Response) {
-    try {
-      const code = String(req.params.code)
-      const data = await assetClassesService.findByCode(code)
+    const { code } = req.params
+    const assetClass = await assetClassesService.findByCode(code)
 
-      if (!data) {
-        return res.status(404).json({
-          message: 'Classe de ativo não encontrada.',
-        })
-      }
-
-      return res.status(200).json(data)
-    } catch (error) {
-      console.error('Erro ao buscar classe de ativo:', error)
-      return res.status(500).json({
-        message: 'Erro interno ao buscar classe de ativo.',
-      })
+    if (!assetClass) {
+      throw new AppError(`Classe de ativo não encontrada: ${code}`, 404)
     }
+
+    res.json(assetClass)
+  }
+
+  async updateByCode(req: Request, res: Response) {
+    const { code } = req.params
+    const body = updateAssetClassSchema.parse(req.body)
+    const updated = await assetClassesService.updateByCode(code, body)
+    res.json(updated)
   }
 }
