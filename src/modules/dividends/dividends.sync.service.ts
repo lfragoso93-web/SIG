@@ -36,14 +36,14 @@ async function fetchDividendsFromYahoo(ticker: string): Promise<YahooDividend[]>
 }
 
 /**
- * Calcula a quantidade acumulada de um ativo ate uma data (exclusive)
- * somando BUY e subtraindo SELL.
+ * Quantidade acumulada do ativo na data de pagamento (inclusive).
+ * Usa lte para incluir compras realizadas no mesmo dia do dividendo.
  */
 async function quantityAtDate(assetId: string, date: Date): Promise<number> {
   const txs = await prisma.transaction.findMany({
     where: {
       assetId,
-      tradeDate: { lt: date },
+      tradeDate: { lte: date },
       type:      { in: ['BUY', 'SELL'] },
     },
     select: { type: true, quantity: true },
@@ -99,9 +99,9 @@ export async function syncDividendsForTicker(ticker: string): Promise<SyncResult
     if (!match || match.d.amount === 0) { result.notFound++; continue }
 
     const rate     = match.d.amount
-    // Quantidade possuida na data de pagamento
     const qty      = await quantityAtDate(event.assetId, new Date(event.paymentDate))
-    const grossAmt = qty > 0 ? Number((rate * qty).toFixed(2)) : Number(rate.toFixed(6))
+    // Sempre multiplica rate x qty — se qty=0 (nao tinha o ativo), salva 0
+    const grossAmt = Number((rate * qty).toFixed(2))
 
     await prisma.incomeEvent.update({
       where: { id: event.id },
