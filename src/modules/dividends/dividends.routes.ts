@@ -1,8 +1,7 @@
-import { Router } from 'express'
+import { FastifyInstance } from 'fastify'
 import { dividendsController } from './dividends.controller'
 
-const router = Router()
-
-router.get('/summary', (req, res, next) => dividendsController.getSummary(req, res, next))
-
-export { router as dividendsRouter }
+export async function dividendsRoutes(app: FastifyInstance) {
+  app.get('/dividends/summary', dividendsController.getSummary)
+  app.post('/dividends/sync',   dividendsController.sync)
+}
