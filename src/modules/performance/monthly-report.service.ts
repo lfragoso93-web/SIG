@@ -14,7 +14,7 @@ const fmtDate = (d: Date): string => d.toISOString().slice(0, 10)
 function lastFridayOnOrBefore(date: Date): Date {
   const d = new Date(date)
   const dow = d.getUTCDay() // 0=dom … 5=sex … 6=sab
-  const diff = dow >= 5 ? dow - 5 : dow + 2 // dias a subtrair para chegar na sexta
+  const diff = dow >= 5 ? dow - 5 : dow + 2
   d.setUTCDate(d.getUTCDate() - diff)
   return d
 }
@@ -28,17 +28,25 @@ export class MonthlyReportService {
     const firstDay = new Date(Date.UTC(year, mon - 1, 1))
     const lastDay  = new Date(Date.UTC(year, mon, 0))
 
-    // Último dia do mês anterior
+    // Primeiro e último dia do mês anterior
     const firstDayPrevMonth = new Date(Date.UTC(year, mon - 2, 1))
     const lastDayPrevMonth  = new Date(Date.UTC(year, mon - 1, 0))
 
     // Snapshots de referência (última sexta <= fim do mês)
-    const endSnapshotDate   = lastFridayOnOrBefore(lastDay)
-    const startSnapshotDate = lastFridayOnOrBefore(lastDayPrevMonth)
+    const endSnapshotDate      = lastFridayOnOrBefore(lastDay)
+    const startSnapshotDate    = lastFridayOnOrBefore(lastDayPrevMonth)
+    const prevStartSnapshotDate = lastFridayOnOrBefore(
+      new Date(Date.UTC(year, mon - 3, 0)) // última sexta do mês 2 atrás
+    )
 
     const period = SnapshotPeriod.WEEKLY
 
-    const [startSnapshot, endSnapshot] = await Promise.all([
+    const [prevStartSnapshot, startSnapshot, endSnapshot] = await Promise.all([
+      prisma.portfolioSnapshot.findFirst({
+        where: { period, referenceDate: { lte: prevStartSnapshotDate } },
+        orderBy: { referenceDate: 'desc' },
+        select: { totalMarketValue: true, referenceDate: true },
+      }),
       prisma.portfolioSnapshot.findFirst({
         where: { period, referenceDate: { lte: startSnapshotDate } },
         orderBy: { referenceDate: 'desc' },
@@ -65,12 +73,11 @@ export class MonthlyReportService {
       throw new Error('Nenhum snapshot encontrado para o mês informado.')
     }
 
-    // ── Patrimônio ─────────────────────────────────────────────────────────
-    const startValue = startSnapshot ? toNum(startSnapshot.totalMarketValue) : 0
-    const endValue   = toNum(endSnapshot.totalMarketValue)
+    // ── Patrimônio ──────────────────────────────────────────────────────────
+    const startValue     = startSnapshot ? toNum(startSnapshot.totalMarketValue) : 0
+    const endValue       = toNum(endSnapshot.totalMarketValue)
     const absoluteChange = endValue - startValue
 
-    // Aportes líquidos no período
     const transactions = await prisma.transaction.findMany({
       where: {
         tradeDate: { gte: firstDay, lte: lastDay },
@@ -88,15 +95,15 @@ export class MonthlyReportService {
     const base        = startValue + netContributions
     const returnPct   = base > 0 ? capitalGain / base : null
 
-    // ── Evolução 12 meses (últimos 12 snapshots mensais — última sexta de cada mês) ──
+    // ── Evolução 12 meses ───────────────────────────────────────────────────
     const chart12 = await this.getLast12MonthsChart(year, mon, period)
 
-    // ── Por classe ─────────────────────────────────────────────────────────
+    // ── Por classe ──────────────────────────────────────────────────────────
     const totalMV = endValue || 0
     const positiveGapsTotal = endSnapshot.classSnapshots.reduce((sum, cs) => {
+      if (cs.targetPercentage === null) return sum
       const target  = toNum(cs.targetPercentage)
       const current = toNum(cs.currentPercentage)
-      if (cs.targetPercentage === null) return sum
       const gap = (target - current) * totalMV
       return gap > 0 ? sum + gap : sum
     }, 0)
@@ -108,33 +115,31 @@ export class MonthlyReportService {
       const currentPct     = cs.currentPercentage !== null ? toNum(cs.currentPercentage) : null
       const targetPct      = cs.targetPercentage  !== null ? toNum(cs.targetPercentage)  : null
 
-      let rebalanceDiff: number | null = null
+      let rebalanceDiff: number | null    = null
       let suggestedContrib: number | null = null
 
       if (targetPct !== null && currentPct !== null) {
         const gap = (targetPct - currentPct) * totalMV
         rebalanceDiff = fmt(gap)
-        if (gap > 0 && positiveGapsTotal > 0) {
-          suggestedContrib = fmt((monthlyContribution * gap) / positiveGapsTotal)
-        } else {
-          suggestedContrib = 0
-        }
+        suggestedContrib = (gap > 0 && positiveGapsTotal > 0)
+          ? fmt((monthlyContribution * gap) / positiveGapsTotal)
+          : 0
       }
 
       return {
-        code:                cs.assetClass.code,
-        name:                cs.assetClass.name,
-        marketValue:         fmt(marketValue),
-        investedAmount:      fmt(investedAmount),
-        profitLoss:          fmt(profitLoss),
-        currentPercentage:   currentPct !== null ? fmt(currentPct, 6) : null,
-        targetPercentage:    targetPct  !== null ? fmt(targetPct,  6) : null,
-        rebalanceDifference: rebalanceDiff,
+        code:                  cs.assetClass.code,
+        name:                  cs.assetClass.name,
+        marketValue:           fmt(marketValue),
+        investedAmount:        fmt(investedAmount),
+        profitLoss:            fmt(profitLoss),
+        currentPercentage:     currentPct !== null ? fmt(currentPct, 6) : null,
+        targetPercentage:      targetPct  !== null ? fmt(targetPct,  6) : null,
+        rebalanceDifference:   rebalanceDiff,
         suggestedContribution: suggestedContrib,
       }
     })
 
-    // ── Dividendos do mês ──────────────────────────────────────────────────
+    // ── Dividendos do mês ───────────────────────────────────────────────────
     const incomeEvents = await prisma.incomeEvent.findMany({
       where: {
         paymentDate: { gte: firstDay, lte: lastDay },
@@ -152,10 +157,9 @@ export class MonthlyReportService {
       dividendsByClass[code] = (dividendsByClass[code] ?? 0) + toNum(e.netAmount ?? e.grossAmount)
     }
 
-    // Últimos 12 meses de dividendos (prévia)
     const dividendsLast12 = await this.getDividendsLast12Months(year, mon)
 
-    // ── Comparação mês anterior ────────────────────────────────────────────
+    // ── Comparação mês anterior ─────────────────────────────────────────────
     let prevMonthComparison: {
       month: string
       startValue: number
@@ -165,16 +169,8 @@ export class MonthlyReportService {
     } | null = null
 
     if (startSnapshot) {
-      const prevStartSnapshotDate = lastFridayOnOrBefore(
-        new Date(Date.UTC(year, mon - 3, 0)) // última sexta do mês 2 meses atrás
-      )
-      const prevStartSnapshot = await prisma.portfolioSnapshot.findFirst({
-        where: { period, referenceDate: { lte: prevStartSnapshotDate } },
-        orderBy: { referenceDate: 'desc' },
-      })
-
-      const prevStart = prevStartSnapshot ? toNum(prevStartSnapshot.totalMarketValue) : 0
-      const prevEnd   = toNum(startSnapshot.totalMarketValue)
+      const prevStart  = prevStartSnapshot ? toNum(prevStartSnapshot.totalMarketValue) : 0
+      const prevEnd    = toNum(startSnapshot.totalMarketValue)
       const prevChange = prevEnd - prevStart
 
       const prevTx = await prisma.transaction.findMany({
@@ -184,15 +180,17 @@ export class MonthlyReportService {
         },
         select: { type: true, grossAmount: true },
       })
-      const prevNet = prevTx.reduce((s, tx) => {
+      const prevNet  = prevTx.reduce((s, tx) => {
         const a = toNum(tx.grossAmount)
         return tx.type === TransactionType.BUY ? s + a : s - a
       }, 0)
       const prevGain = prevChange - prevNet
       const prevBase = prevStart + prevNet
+      const prevMon  = mon - 1 === 0 ? 12 : mon - 1
+      const prevYear = mon - 1 === 0 ? year - 1 : year
 
       prevMonthComparison = {
-        month:          `${year}-${String(mon - 1 === 0 ? 12 : mon - 1).padStart(2, '0')}`,
+        month:          `${prevYear}-${String(prevMon).padStart(2, '0')}`,
         startValue:     fmt(prevStart),
         endValue:       fmt(prevEnd),
         absoluteChange: fmt(prevChange),
@@ -203,10 +201,10 @@ export class MonthlyReportService {
     return {
       period: {
         month,
-        startDate:           fmtDate(firstDay),
-        endDate:             fmtDate(lastDay),
-        startSnapshotDate:   startSnapshot ? fmtDate(startSnapshot.referenceDate) : null,
-        endSnapshotDate:     fmtDate(endSnapshot.referenceDate),
+        startDate:         fmtDate(firstDay),
+        endDate:           fmtDate(lastDay),
+        startSnapshotDate: startSnapshot ? fmtDate(startSnapshot.referenceDate) : null,
+        endSnapshotDate:   fmtDate(endSnapshot.referenceDate),
       },
       patrimony: {
         startValue:       fmt(startValue),
@@ -220,10 +218,7 @@ export class MonthlyReportService {
       byClass,
       dividends: {
         totalMonth:   fmt(totalDividends),
-        byClass:      Object.entries(dividendsByClass).map(([code, total]) => ({
-          code,
-          total: fmt(total),
-        })),
+        byClass:      Object.entries(dividendsByClass).map(([code, total]) => ({ code, total: fmt(total) })),
         last12Months: dividendsLast12,
       },
       comparison: {
@@ -232,21 +227,15 @@ export class MonthlyReportService {
     }
   }
 
-  // ── helpers ────────────────────────────────────────────────────────────────
-
-  private async getLast12MonthsChart(
-    year: number,
-    mon: number,
-    period: SnapshotPeriod,
-  ) {
+  private async getLast12MonthsChart(year: number, mon: number, period: SnapshotPeriod) {
     const points: { month: string; marketValue: number; totalInvested: number }[] = []
 
     for (let i = 11; i >= 0; i--) {
-      const d    = new Date(Date.UTC(year, mon - 1 - i, 1))
-      const y    = d.getUTCFullYear()
-      const m    = d.getUTCMonth() + 1
+      const d     = new Date(Date.UTC(year, mon - 1 - i, 1))
+      const y     = d.getUTCFullYear()
+      const m     = d.getUTCMonth() + 1
       const lastD = new Date(Date.UTC(y, m, 0))
-      const ref  = lastFridayOnOrBefore(lastD)
+      const ref   = lastFridayOnOrBefore(lastD)
 
       const snap = await prisma.portfolioSnapshot.findFirst({
         where: { period, referenceDate: { lte: ref } },
@@ -255,9 +244,9 @@ export class MonthlyReportService {
       })
 
       points.push({
-        month:        `${y}-${String(m).padStart(2, '0')}`,
-        marketValue:  snap ? fmt(toNum(snap.totalMarketValue)) : 0,
-        totalInvested: snap ? fmt(toNum(snap.totalInvested))   : 0,
+        month:         `${y}-${String(m).padStart(2, '0')}`,
+        marketValue:   snap ? fmt(toNum(snap.totalMarketValue)) : 0,
+        totalInvested: snap ? fmt(toNum(snap.totalInvested))    : 0,
       })
     }
 
@@ -275,10 +264,7 @@ export class MonthlyReportService {
       const last  = new Date(Date.UTC(y, m, 0))
 
       const events = await prisma.incomeEvent.findMany({
-        where: {
-          paymentDate: { gte: first, lte: last },
-          status: { not: 'CANCELED' },
-        },
+        where: { paymentDate: { gte: first, lte: last }, status: { not: 'CANCELED' } },
         select: { grossAmount: true, netAmount: true },
       })
 
