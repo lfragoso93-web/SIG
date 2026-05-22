@@ -2,6 +2,8 @@ import { Prisma, SnapshotPeriod } from '@prisma/client'
 import { prisma } from '../../core/prisma/prisma.service'
 import { AllocationBodyInput, AllocationQueryInput } from './allocation.schema'
 
+type AllocationPolicyStatus = 'ON_POLICY' | 'MISSING_TARGET'
+
 type AllocationClassResult = {
   assetClassId: string
   code: string
@@ -14,6 +16,7 @@ type AllocationClassResult = {
   suggestedContribution: number
   projectedAmount: number
   projectedPercentage: number | null
+  policyStatus: AllocationPolicyStatus
 }
 
 type AllocationResult = {
@@ -124,6 +127,9 @@ export class AllocationService {
       const rawGap = targetAmount - currentAmount
       const gapAmount = rawGap > 0 ? rawGap : 0
 
+      const policyStatus: AllocationPolicyStatus =
+        targetPercentage !== null ? 'ON_POLICY' : 'MISSING_TARGET'
+
       return {
         assetClassId,
         code: assetClass.code,
@@ -133,6 +139,7 @@ export class AllocationService {
         targetPercentage,
         targetAmount,
         gapAmount,
+        policyStatus,
       }
     })
 
@@ -141,7 +148,7 @@ export class AllocationService {
     const classes: AllocationClassResult[] = baseRows
       .map((item) => {
         const suggestedContribution =
-          totalGapPositive > 0
+          item.policyStatus === 'ON_POLICY' && totalGapPositive > 0
             ? (item.gapAmount / totalGapPositive) * monthlyContribution
             : 0
 
@@ -170,9 +177,15 @@ export class AllocationService {
             projectedPercentage !== null
               ? Number(projectedPercentage.toFixed(6))
               : null,
+          policyStatus: item.policyStatus,
         }
       })
-      .sort((a, b) => b.gapAmount - a.gapAmount)
+      .sort((a, b) => {
+        if (a.policyStatus !== b.policyStatus) {
+          return a.policyStatus === 'MISSING_TARGET' ? 1 : -1
+        }
+        return b.gapAmount - a.gapAmount
+      })
 
     return {
       referenceDate: requestedReferenceDate.toISOString().slice(0, 10),
