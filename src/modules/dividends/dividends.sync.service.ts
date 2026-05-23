@@ -1,12 +1,14 @@
-import { prisma } from '../../core/prisma/prisma.service'
+import { Decimal } from '@prisma/client/runtime/library'
+import { prisma }   from '../../core/prisma/prisma.service'
 
 const YAHOO_BASE   = 'https://query1.finance.yahoo.com/v8/finance/chart'
 const TOLERANCE_MS = 4 * 24 * 60 * 60 * 1000
 
 const toNum = (v: unknown): number => {
   if (v === null || v === undefined) return 0
-  if (typeof v === 'number') return v
-  if (typeof v === 'string') return parseFloat(v) || 0
+  if (v instanceof Decimal)          return v.toNumber()
+  if (typeof v === 'number')         return v
+  if (typeof v === 'string')         return parseFloat(v) || 0
   return 0
 }
 
@@ -40,7 +42,6 @@ async function quantityAtDate(assetId: string, date: Date): Promise<number> {
     },
     select: { type: true, quantity: true },
   })
-  console.log(`[sync] quantityAtDate assetId=${assetId} date=${date.toISOString()} txs=${txs.length} qty=${txs.reduce((s,t) => t.type==='BUY'?s+toNum(t.quantity):s-toNum(t.quantity),0)}`)
   return txs.reduce((sum, tx) => {
     const q = toNum(tx.quantity)
     return tx.type === 'BUY' ? sum + q : sum - q
@@ -67,12 +68,6 @@ export async function syncDividendsForTicker(ticker: string): Promise<SyncResult
     select: { id: true, paymentDate: true, assetId: true },
   })
 
-  console.log(`[sync] ${ticker}: ${events.length} eventos sem grossAmount`)
-  // Loga o tipo e valor do paymentDate do primeiro evento
-  if (events[0]) {
-    console.log(`[sync] paymentDate type=${typeof events[0].paymentDate} value=${JSON.stringify(events[0].paymentDate)}`)
-  }
-
   result.total = events.length
   if (events.length === 0) return result
 
@@ -84,17 +79,14 @@ export async function syncDividendsForTicker(ticker: string): Promise<SyncResult
     return result
   }
 
-  // Processa apenas os 3 mais recentes para debug
-  const sample = events.slice(-3)
-  for (const event of sample) {
+  for (const event of events) {
     if (!event.paymentDate) { result.notFound++; continue }
 
-    const payDate  = event.paymentDate instanceof Date
+    const payDate = event.paymentDate instanceof Date
       ? event.paymentDate
       : new Date(event.paymentDate as unknown as string)
 
     const eventMs = payDate.getTime()
-    console.log(`[sync] evento id=${event.id} payDate=${payDate.toISOString()} ms=${eventMs}`)
 
     const match = yahooDividends
       .map((d) => ({ d, diff: Math.abs(d.date * 1000 - eventMs) }))
@@ -102,7 +94,6 @@ export async function syncDividendsForTicker(ticker: string): Promise<SyncResult
       .sort((a, b) => a.diff - b.diff)[0]
 
     if (!match || match.d.amount === 0) {
-      console.log(`[sync] sem match para ${payDate.toISOString()}`)
       result.notFound++
       continue
     }
@@ -110,30 +101,7 @@ export async function syncDividendsForTicker(ticker: string): Promise<SyncResult
     const rate     = match.d.amount
     const qty      = await quantityAtDate(event.assetId, payDate)
     const grossAmt = Number((rate * qty).toFixed(2))
-    console.log(`[sync] rate=${rate} qty=${qty} grossAmt=${grossAmt}`)
 
-    await prisma.incomeEvent.update({
-      where: { id: event.id },
-      data:  { grossAmount: grossAmt, netAmount: grossAmt },
-    })
-    result.updated++
-  }
-
-  // Processa o restante normalmente
-  for (const event of events.filter(e => !sample.includes(e))) {
-    if (!event.paymentDate) { result.notFound++; continue }
-    const payDate  = event.paymentDate instanceof Date
-      ? event.paymentDate
-      : new Date(event.paymentDate as unknown as string)
-    const eventMs  = payDate.getTime()
-    const match    = yahooDividends
-      .map((d) => ({ d, diff: Math.abs(d.date * 1000 - eventMs) }))
-      .filter(({ diff }) => diff <= TOLERANCE_MS)
-      .sort((a, b) => a.diff - b.diff)[0]
-    if (!match || match.d.amount === 0) { result.notFound++; continue }
-    const rate     = match.d.amount
-    const qty      = await quantityAtDate(event.assetId, payDate)
-    const grossAmt = Number((rate * qty).toFixed(2))
     await prisma.incomeEvent.update({
       where: { id: event.id },
       data:  { grossAmount: grossAmt, netAmount: grossAmt },
