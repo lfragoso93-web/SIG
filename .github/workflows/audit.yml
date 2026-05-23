@@ -1,0 +1,35 @@
+name: npm audit
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'package*.json'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'package*.json'
+  schedule:
+    # Toda segunda às 06:30 UTC
+    - cron: '30 6 * * 1'
+
+jobs:
+  audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run audit (moderate+)
+        run: npm audit --audit-level=moderate

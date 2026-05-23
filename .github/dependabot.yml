@@ -1,0 +1,50 @@
+version: 2
+updates:
+  # ── Dependências npm ───────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "lfragoso93-web"
+    labels:
+      - "dependencies"
+      - "security"
+    groups:
+      # Agrupa updates de tipos juntos para menos barulho
+      typescript-types:
+        patterns:
+          - "@types/*"
+      # Agrupa Prisma junto (client + adapter costumam andar juntos)
+      prisma:
+        patterns:
+          - "@prisma/*"
+          - "prisma"
+
+  # ── Imagens Docker ───────────────────────────────────────────
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    labels:
+      - "dependencies"
+      - "docker"
+
+  # ── GitHub Actions ─────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    labels:
+      - "dependencies"
+      - "ci"
