@@ -37,11 +37,11 @@ A arquitetura do SIG é guiada por domínios, e não por telas isoladas ou por e
 - `asset-classes`: classes de ativos.
 - `assets`: cadastro e metadados dos ativos.
 - `transactions`: compras, vendas e movimentações.
-- `price-history`: histórico de preços.
+- `price-history`: histórico de preços via Yahoo Finance.
 - `income-events`: dividendos, juros, rendimentos e proventos.
 - `dividends`: sync automático de proventos via Yahoo Finance.
 - `portfolio-items`: posição consolidada por ativo.
-- `portfolio-snapshots`: fotografia da carteira por data.
+- `portfolio-snapshots`: fotografia semanal da carteira por data.
 
 ### 3. Domínio futuro de finanças pessoais
 
@@ -66,6 +66,8 @@ src/
     middleware/
     utils/
     constants/
+  providers/
+    yahoo/              # cliente Yahoo Finance (preços históricos e proventos)
   modules/
     auth/
     users/
@@ -102,11 +104,11 @@ O núcleo de investimentos está funcional. O backend responde corretamente, o a
 | `asset-classes` | ✅ Funcional | Base para classificação dos ativos |
 | `assets` | ✅ Funcional | Cadastro, consulta e metadados implementados |
 | `transactions` | ✅ Funcional | CRUD completo com validações |
-| `price-history` | ✅ Funcional | Histórico de preços via Yahoo Finance |
+| `price-history` | ✅ Funcional | Histórico de preços via Yahoo Finance; importação individual (`POST /price-history/import/:ticker`) e em lote (`POST /price-history/import-batch`) |
 | `income-events` | ✅ Funcional | CRUD de proventos implementado |
 | `dividends` | ✅ Funcional | Sync automático via Yahoo Finance: calcula `grossAmount = rate × qty` considerando a posição na data do pagamento |
 | `portfolio-items` | ✅ Funcional | Posição consolidada por ativo calculada e persistida |
-| `portfolio-snapshots` | 🔄 Em andamento | Estrutura montada; consolidação temporal em evolução |
+| `portfolio-snapshots` | ✅ Funcional | Snapshots semanais (sextas-feiras) gerados com preços reais; geração manual por data ou intervalo |
 | `users` | 📋 Planejado | Ainda não implementado |
 | `cash-transactions` | 📋 Planejado | Domínio futuro de finanças pessoais |
 | `budgets` | 📋 Planejado | Domínio futuro de finanças pessoais |
@@ -116,7 +118,10 @@ O núcleo de investimentos está funcional. O backend responde corretamente, o a
 - **Prisma Decimal**: campos `Decimal` do Prisma retornam instâncias de `Prisma.Decimal`, não `number`. Toda leitura numérica deve usar `.toNumber()` antes de qualquer operação aritmética.
 - **Datas no banco**: campos `@db.Date` retornam objetos `Date` com hora `00:00:00.000Z`. Comparações com `lte`/`gte` no Prisma funcionam normalmente.
 - **Sync de dividendos**: o cálculo de `grossAmount` considera apenas transações do tipo `BUY`/`SELL` com `tradeDate <= paymentDate`. Eventos anteriores à primeira compra ficam com `grossAmount = 0` (comportamento esperado).
-- **Yahoo Finance**: dados de proventos são buscados pelo endpoint `/v8/finance/chart` com `events=dividends`. A tolerância de match entre `paymentDate` do evento e a data do Yahoo é de ±4 dias.
+- **Yahoo Finance — preços**: dados históricos buscados via `/v8/finance/chart` com `interval=1d`. O campo `closePrice` (preço nominal) é usado nos snapshots; `adjustedClose` é gravado no banco mas não é lido — decisão intencional para manter consistência entre preço de mercado e custo médio, ambos nominais.
+- **Yahoo Finance — proventos**: dados buscados com `events=dividends`. A tolerância de match entre `paymentDate` do evento e a data retornada pelo Yahoo é de ±4 dias.
+- **Splits e grupamentos**: o sistema **não detecta corporate actions automaticamente**. Desdobramentos e grupamentos devem ser registrados manualmente como transações do tipo `SPLIT` / `REVERSE_SPLIT`. Mudanças de ticker (ex: PETZ3 → AUAU3 após incorporação) também são tratadas manualmente via atualização direta no banco.
+- **Ticker no Yahoo Finance**: ativos brasileiros são consultados com sufixo `.SA` (ex: `PETR4.SA`). O cliente Yahoo adiciona o sufixo automaticamente se ausente.
 
 ## Roadmap
 
@@ -129,15 +134,15 @@ O núcleo de investimentos está funcional. O backend responde corretamente, o a
 
 ### Fase 2 — Núcleo de investimentos ✅ Concluída
 
-- Fechar `price-history`. ✅
+- Fechar `price-history` com Yahoo Finance. ✅
 - Fechar `income-events`. ✅
 - Implementar sync de dividendos (`dividends`). ✅
 - Consolidar `portfolio-items`. ✅
-- Consolidar `portfolio-snapshots`. 🔄 Em andamento
+- Consolidar `portfolio-snapshots`. ✅
 
 ### Fase 3 — Experiência do produto
 
-- Fechar `portfolio-snapshots`.
+- Automação dos snapshots (cron semanal ou trigger pós-transação). 🔄 Próximo
 - Definir e iniciar o frontend.
 - Criar dashboard principal.
 - Criar telas de ativos, transações e posição.
@@ -156,6 +161,10 @@ O núcleo de investimentos está funcional. O backend responde corretamente, o a
 - Implementar recorrências.
 - Implementar relatórios financeiros pessoais.
 - Integrar visão patrimonial total com investimentos.
+
+### Backlog técnico (sem prioridade definida)
+
+- Corporate actions automáticos: detecção de splits, grupamentos e mudanças de ticker via Yahoo Finance.
 
 ## Como usar este README
 
