@@ -12,9 +12,16 @@ function toNum(val: unknown): number {
 function toFriday(date: Date): Date {
   const d = new Date(date);
   d.setUTCHours(0, 0, 0, 0);
-  const day = d.getUTCDay(); // 0=dom … 5=sex … 6=sab
+  const day = d.getUTCDay();
   const diff = day <= 5 ? 5 - day : 5 - day + 7;
   d.setUTCDate(d.getUTCDate() + diff);
+  return d;
+}
+
+/** Normaliza qualquer data para meia-noite UTC. */
+function toMidnightUTC(date: Date): Date {
+  const d = new Date(date);
+  d.setUTCHours(0, 0, 0, 0);
   return d;
 }
 
@@ -29,6 +36,19 @@ function fridaysBetween(start: Date, end: Date): Date[] {
     current.setUTCDate(current.getUTCDate() + 7);
   }
   return fridays;
+}
+
+/** Gera todos os dias úteis (seg–sex) entre start e end (inclusive). */
+function weekdaysBetween(start: Date, end: Date): Date[] {
+  const days: Date[] = [];
+  const current = toMidnightUTC(start);
+  const limit   = toMidnightUTC(end);
+  while (current <= limit) {
+    const dow = current.getUTCDay();
+    if (dow >= 1 && dow <= 5) days.push(new Date(current));
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+  return days;
 }
 
 // ─── cálculo de posição até uma data ─────────────────────────────────────────
@@ -57,23 +77,43 @@ function calcPosition(txs: { type: string; quantity: unknown; unitPrice: unknown
 
 // ─── geração de snapshot ────────────────────────────────────────────────────
 
-export async function generateSnapshot(referenceDate: Date) {
-  const friday = toFriday(referenceDate);
-  const fridayEnd = new Date(friday);
-  fridayEnd.setUTCHours(23, 59, 59, 999);
+export type SnapshotPeriodType = 'DAILY' | 'WEEKLY';
 
-  // Busca todas as classes ativas para preservar targetPercentage mesmo
-  // quando alguma classe ainda não tem posição nessa data.
+/**
+ * Gera (ou atualiza) um snapshot para a data de referência informada.
+ *
+ * Para WEEKLY: usa a sexta-feira da semana e aceita o preço mais recente
+ *              disponível até o fim daquele dia (comportamento original).
+ * Para DAILY:  usa a data exata e exige que exista closePrice para aquele
+ *              dia. Se não houver preço para nenhum ativo (feriado/fim de
+ *              semana), retorna null — o cron deve pular silenciosamente.
+ */
+export async function generateSnapshot(
+  referenceDate: Date,
+  period: SnapshotPeriodType = 'WEEKLY',
+) {
+  const anchor     = period === 'WEEKLY' ? toFriday(referenceDate) : toMidnightUTC(referenceDate);
+  const anchorEnd  = new Date(anchor);
+  anchorEnd.setUTCHours(23, 59, 59, 999);
+
+  // Para DAILY: verifica se há ao menos um preço de fechamento nessa data.
+  // Se não houver (feriado, fim de semana), retorna null → pula.
+  if (period === 'DAILY') {
+    const priceCount = await prisma.priceHistory.count({
+      where: { priceDate: { gte: anchor, lte: anchorEnd } },
+    });
+    if (priceCount === 0) return null;
+  }
+
   const assetClasses = await prisma.assetClass.findMany({
     where:   { isActive: true },
     orderBy: { displayOrder: 'asc' },
   });
 
-  // Todos os ativos com transações até essa sexta
   const assets = await prisma.asset.findMany({
     where: {
       isActive: true,
-      transactions: { some: { status: 'POSTED', tradeDate: { lte: fridayEnd } } },
+      transactions: { some: { status: 'POSTED', tradeDate: { lte: anchorEnd } } },
     },
     include: { assetClass: true },
   });
@@ -84,7 +124,6 @@ export async function generateSnapshot(referenceDate: Date) {
 
   const assetSnapshots: Prisma.PortfolioAssetSnapshotCreateManySnapshotInput[] = [];
 
-  // Inicializa byClass com TODAS as classes ativas, já com a meta gravada
   const byClass = new Map<string, {
     assetClassId:     string;
     invested:         number;
@@ -105,7 +144,7 @@ export async function generateSnapshot(referenceDate: Date) {
 
   for (const asset of assets) {
     const txs = await prisma.transaction.findMany({
-      where:   { assetId: asset.id, status: 'POSTED', tradeDate: { lte: fridayEnd } },
+      where:   { assetId: asset.id, status: 'POSTED', tradeDate: { lte: anchorEnd } },
       orderBy: { tradeDate: 'asc' },
     });
 
@@ -115,8 +154,14 @@ export async function generateSnapshot(referenceDate: Date) {
     const averagePrice   = totalCost / quantity;
     const investedAmount = quantity * averagePrice;
 
+    // Para DAILY: busca o preço exato do dia; sem preço → usa investedAmount (sem distorção).
+    // Para WEEKLY: busca o preço mais recente até o fim da sexta (comportamento original).
+    const priceQuery = period === 'DAILY'
+      ? { assetId: asset.id, priceDate: { gte: anchor, lte: anchorEnd } }
+      : { assetId: asset.id, priceDate: { lte: anchorEnd } };
+
     const priceRow = await prisma.priceHistory.findFirst({
-      where:   { assetId: asset.id, priceDate: { lte: fridayEnd } },
+      where:   priceQuery,
       orderBy: { priceDate: 'desc' },
     });
     const marketPrice = priceRow ? toNum(priceRow.closePrice) : null;
@@ -124,7 +169,7 @@ export async function generateSnapshot(referenceDate: Date) {
     const profitLoss  = marketValue - investedAmount;
 
     const incomeAgg = await prisma.incomeEvent.aggregate({
-      where: { assetId: asset.id, status: { in: ['CONFIRMED', 'PAID'] }, paymentDate: { lte: fridayEnd } },
+      where: { assetId: asset.id, status: { in: ['CONFIRMED', 'PAID'] }, paymentDate: { lte: anchorEnd } },
       _sum:  { netAmount: true, grossAmount: true },
     });
     const incomeReceived = toNum(incomeAgg._sum.netAmount ?? incomeAgg._sum.grossAmount);
@@ -146,7 +191,6 @@ export async function generateSnapshot(referenceDate: Date) {
       incomeReceived: new Prisma.Decimal(incomeReceived),
     });
 
-    // Agrega por classe
     const cls = byClass.get(asset.assetClassId) ?? {
       assetClassId:     asset.assetClassId,
       invested:         0,
@@ -166,12 +210,9 @@ export async function generateSnapshot(referenceDate: Date) {
   ].map((cls) => {
     const currentPct = totalMarketValue > 0 ? cls.marketValue / totalMarketValue : 0;
     const targetPct  = cls.targetPercentage;
-
-    // rebalanceDifference: quanto falta (positivo) ou sobra (negativo) em R$ para atingir a meta
     const rebalanceDifference = targetPct !== null
       ? new Prisma.Decimal((targetPct - currentPct) * totalMarketValue)
       : null;
-
     return {
       assetClassId:          cls.assetClassId,
       investedAmount:        new Prisma.Decimal(cls.invested),
@@ -180,13 +221,12 @@ export async function generateSnapshot(referenceDate: Date) {
       currentPercentage:     new Prisma.Decimal(currentPct),
       targetPercentage:      targetPct !== null ? new Prisma.Decimal(targetPct) : null,
       rebalanceDifference,
-      // suggestedContribution: preenchida pelo módulo de performance com o aporte mensal informado
       suggestedContribution: null,
     };
   });
 
   const snapshot = await prisma.portfolioSnapshot.upsert({
-    where:  { referenceDate_period: { referenceDate: friday, period: 'WEEKLY' } },
+    where:  { referenceDate_period: { referenceDate: anchor, period } },
     update: {
       totalInvested:      new Prisma.Decimal(totalInvested),
       totalMarketValue:   new Prisma.Decimal(totalMarketValue),
@@ -197,8 +237,8 @@ export async function generateSnapshot(referenceDate: Date) {
       classSnapshots: { deleteMany: {}, createMany: { data: classSnapshots } },
     },
     create: {
-      referenceDate:      friday,
-      period:             'WEEKLY',
+      referenceDate:      anchor,
+      period,
       totalInvested:      new Prisma.Decimal(totalInvested),
       totalMarketValue:   new Prisma.Decimal(totalMarketValue),
       totalProfitLoss:    new Prisma.Decimal(totalProfitLoss),
@@ -216,26 +256,35 @@ export async function generateSnapshot(referenceDate: Date) {
   return formatSnapshot(snapshot);
 }
 
-export async function generateSnapshotRange(startDate: Date, endDate: Date) {
-  const fridays = fridaysBetween(startDate, endDate);
+export async function generateSnapshotRange(
+  startDate: Date,
+  endDate:   Date,
+  period:    SnapshotPeriodType = 'WEEKLY',
+) {
+  const dates = period === 'WEEKLY'
+    ? fridaysBetween(startDate, endDate)
+    : weekdaysBetween(startDate, endDate);
+
   const results: object[] = [];
   const errors:  object[] = [];
 
-  for (const friday of fridays) {
+  for (const date of dates) {
     try {
-      results.push(await generateSnapshot(friday));
+      const snap = await generateSnapshot(date, period);
+      if (snap !== null) results.push(snap);
+      // snap === null significa feriado (DAILY sem preços) → pula silenciosamente
     } catch (err) {
-      errors.push({ date: friday.toISOString().slice(0, 10), error: (err as Error).message });
+      errors.push({ date: date.toISOString().slice(0, 10), error: (err as Error).message });
     }
   }
 
   return { generated: results.length, errors, snapshots: results };
 }
 
-export async function listSnapshots(from?: Date, to?: Date) {
+export async function listSnapshots(from?: Date, to?: Date, period: SnapshotPeriodType = 'WEEKLY') {
   const snapshots = await prisma.portfolioSnapshot.findMany({
     where: {
-      period: 'WEEKLY',
+      period,
       ...(from || to ? {
         referenceDate: {
           ...(from ? { gte: from } : {}),
@@ -249,14 +298,13 @@ export async function listSnapshots(from?: Date, to?: Date) {
       classSnapshots: { include: { assetClass: { select: { code: true, name: true } } } },
     },
   });
-
   return snapshots.map(formatSnapshot);
 }
 
-export async function getSnapshotByDate(referenceDate: Date) {
-  const friday = toFriday(referenceDate);
+export async function getSnapshotByDate(referenceDate: Date, period: SnapshotPeriodType = 'WEEKLY') {
+  const anchor = period === 'WEEKLY' ? toFriday(referenceDate) : toMidnightUTC(referenceDate);
   const snapshot = await prisma.portfolioSnapshot.findUnique({
-    where: { referenceDate_period: { referenceDate: friday, period: 'WEEKLY' } },
+    where: { referenceDate_period: { referenceDate: anchor, period } },
     include: {
       assetSnapshots: { include: { asset: { select: { ticker: true } } } },
       classSnapshots: { include: { assetClass: { select: { code: true, name: true } } } },

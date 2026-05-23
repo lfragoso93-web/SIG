@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../core/prisma/prisma.service'
+import { generateSnapshot } from '../portfolio-snapshots/portfolio-snapshots.service'
 
 type DecimalInput = string | number | Prisma.Decimal | null | undefined
 
@@ -54,22 +55,25 @@ const transactionInclude = {
   },
 }
 
-/**
- * Converte DecimalInput para Prisma.Decimal.
- * Retorna undefined (não null) para campos opcionais no update,
- * pois o Prisma não aceita null em campos Decimal não anuláveis.
- */
 const toDecimal = (value: DecimalInput): Prisma.Decimal | undefined => {
   if (value === null || value === undefined || value === '') return undefined
   return new Prisma.Decimal(value as string | number | Prisma.Decimal)
 }
 
-/**
- * Versão que aceita null — usada no create onde o schema permite null.
- */
 const toDecimalOrNull = (value: DecimalInput): Prisma.Decimal | null => {
   if (value === null || value === undefined || value === '') return null
   return new Prisma.Decimal(value as string | number | Prisma.Decimal)
+}
+
+/**
+ * Dispara a regeneração do snapshot WEEKLY da semana da transação
+ * de forma assíncrona — não bloqueia a resposta da API.
+ * Erros são logados mas não propagados.
+ */
+function triggerSnapshotRegen(tradeDate: Date): void {
+  generateSnapshot(tradeDate, 'WEEKLY')
+    .then(() => console.log(`[snapshot-trigger] WEEKLY regenerado para ${tradeDate.toISOString().slice(0, 10)}`))
+    .catch((err) => console.error('[snapshot-trigger] Erro ao regenerar snapshot:', err))
 }
 
 class TransactionsService {
@@ -84,7 +88,7 @@ class TransactionsService {
       if (!asset) throw new Error('Ativo não encontrado.')
     }
 
-    return prisma.transaction.create({
+    const transaction = await prisma.transaction.create({
       data: {
         accountId:        data.accountId        ?? null,
         assetId:          data.assetId          ?? null,
@@ -108,6 +112,9 @@ class TransactionsService {
       },
       include: transactionInclude,
     })
+
+    triggerSnapshotRegen(data.tradeDate)
+    return transaction
   }
 
   async findAll() {
@@ -140,7 +147,7 @@ class TransactionsService {
       if (!asset) throw new Error('Ativo não encontrado.')
     }
 
-    return prisma.transaction.update({
+    const transaction = await prisma.transaction.update({
       where: { id },
       data: {
         accountId:        data.accountId        !== undefined ? data.accountId        : undefined,
@@ -167,12 +174,21 @@ class TransactionsService {
       },
       include: transactionInclude,
     })
+
+    // Regenera a semana da data original e a semana da nova data (se mudou)
+    triggerSnapshotRegen(existing.tradeDate)
+    if (data.tradeDate && data.tradeDate.getTime() !== existing.tradeDate.getTime()) {
+      triggerSnapshotRegen(data.tradeDate)
+    }
+
+    return transaction
   }
 
   async remove(id: string) {
     const existing = await prisma.transaction.findUnique({ where: { id } })
     if (!existing) throw new Error('Transação não encontrada.')
     await prisma.transaction.delete({ where: { id } })
+    triggerSnapshotRegen(existing.tradeDate)
   }
 }
 
