@@ -1,26 +1,12 @@
 # SIG — Sistema de Gestão de Investimentos
 
-Projeto pessoal em evolução para um sistema modular de gestão de carteira de investimentos, com visão de longo prazo para expansão em gestão financeira pessoal. A direção arquitetural mais adequada para o estágio atual é um **monólito modular**: um único sistema por enquanto, mas organizado por domínios de negócio claros, reduzindo complexidade operacional e facilitando crescimento futuro.[1][2]
+Projeto pessoal em evolução para um sistema modular de gestão de carteira de investimentos, com visão de longo prazo para expansão em gestão financeira pessoal. A direção arquitetural mais adequada para o estágio atual é um **monólito modular**: um único sistema por enquanto, mas organizado por domínios de negócio claros, reduzindo complexidade operacional e facilitando crescimento futuro.
 
 ## Visão do produto
 
-O objetivo atual do SIG é consolidar a gestão de carteira de investimentos em um único sistema, cobrindo cadastro de ativos, transações, histórico de preços, eventos de renda, posição consolidada e snapshots da carteira.[1] A visão futura é expandir a mesma base para um sistema mais amplo de finanças pessoais, aproveitando módulos compartilhados e evitando retrabalho estrutural.[2]
-
-## Objetivos da fase atual
-
-Nesta fase, o foco principal do projeto é construir um núcleo confiável de investimentos antes de abrir novas frentes funcionais. Isso significa priorizar backend, regras de negócio, integração com dados de mercado, autenticação básica e preparação para um frontend futuro.[1][3]
-
-Objetivos imediatos:
-
-- Consolidar o backend modular.
-- Fechar o núcleo de investimentos.
-- Manter o Docker e o ambiente local estáveis.
-- Usar o README como guia vivo de arquitetura e progresso.
-- Preparar a base para um frontend e para expansão futura.
+O objetivo atual do SIG é consolidar a gestão de carteira de investimentos em um único sistema, cobrindo cadastro de ativos, transações, histórico de preços, eventos de renda, posição consolidada e snapshots da carteira. A visão futura é expandir a mesma base para um sistema mais amplo de finanças pessoais, aproveitando módulos compartilhados e evitando retrabalho estrutural.
 
 ## Stack atual
-
-A stack atual do projeto foi pensada para permitir crescimento incremental, com backend tipado, banco relacional e ambiente local reproduzível por containers. Essa combinação é coerente com projetos em amadurecimento que precisam de clareza estrutural sem a complexidade inicial de microsserviços.[1][4]
 
 | Camada | Tecnologia | Papel no sistema |
 |---|---|---|
@@ -29,40 +15,35 @@ A stack atual do projeto foi pensada para permitir crescimento incremental, com 
 | Banco | PostgreSQL | Persistência dos dados |
 | Infra local | Docker Compose | Ambiente de desenvolvimento com API e banco |
 | Validação | Zod | Validação de payloads e entradas |
-| Integrações | Brapi e fontes externas | Preços, históricos e eventos de mercado |
+| Integrações | Yahoo Finance | Preços históricos e eventos de proventos |
 | Futuro frontend | Ainda em definição | Camada visual do produto |
 
 ## Arquitetura modular
 
-A arquitetura do SIG deve ser guiada por domínios, e não por telas isoladas ou por endpoints soltos. A melhor forma de evoluir o sistema agora é separar claramente aquilo que é base da plataforma, aquilo que pertence ao domínio de investimentos e aquilo que será o domínio futuro de finanças pessoais.[1][2]
+A arquitetura do SIG é guiada por domínios, e não por telas isoladas ou por endpoints soltos. Há três camadas: a base do sistema (reutilizável por qualquer domínio), o domínio de investimentos (foco atual) e o domínio futuro de finanças pessoais.
 
 ### 1. Base do sistema
-
-Esses módulos sustentam qualquer área do produto e devem ser reutilizados por investimentos e por finanças pessoais.
 
 - `auth`: login, emissão e validação de token.
 - `users`: usuários do sistema, perfis e preferências.
 - `settings`: parâmetros globais do sistema.
 - `institutions`: corretoras, bancos e instituições financeiras.
-- `accounts`: contas de investimento, contas bancárias e futuras carteiras financeiras.
+- `accounts`: contas de investimento e contas bancárias.
 - `shared`: erros, middlewares, utilitários, constantes e helpers reutilizáveis.
 - `core`: bootstrap do servidor, configuração e Prisma.
 
 ### 2. Domínio de investimentos
-
-Esse é o núcleo atual do produto e deve permanecer como foco principal nas próximas etapas.
 
 - `asset-classes`: classes de ativos.
 - `assets`: cadastro e metadados dos ativos.
 - `transactions`: compras, vendas e movimentações.
 - `price-history`: histórico de preços.
 - `income-events`: dividendos, juros, rendimentos e proventos.
+- `dividends`: sync automático de proventos via Yahoo Finance.
 - `portfolio-items`: posição consolidada por ativo.
 - `portfolio-snapshots`: fotografia da carteira por data.
 
 ### 3. Domínio futuro de finanças pessoais
-
-Esses módulos ainda não são prioridade imediata, mas já devem ser previstos no desenho para evitar acoplamento indevido.
 
 - `categories`: categorias financeiras.
 - `cash-transactions`: receitas, despesas e transferências.
@@ -72,9 +53,7 @@ Esses módulos ainda não são prioridade imediata, mas já devem ser previstos 
 - `reports`: relatórios consolidados de vida financeira.
 - `goals`: metas financeiras e planejamento.
 
-## Estrutura sugerida de pastas
-
-A estrutura abaixo mantém o projeto simples para o estágio atual e, ao mesmo tempo, organizada o suficiente para crescer sem virar um bloco confuso.[1][4]
+## Estrutura de pastas
 
 ```text
 src/
@@ -98,6 +77,7 @@ src/
     transactions/
     price-history/
     income-events/
+    dividends/
     portfolio-items/
     portfolio-snapshots/
     categories/           # futuro
@@ -108,58 +88,57 @@ src/
 
 ## Estado atual do sistema
 
-O projeto já possui uma base backend funcional, com ambiente Docker ativo, build validado e rotas principais de investimentos sendo organizadas por módulo. O sistema já demonstrou responder ao health check e já possui evolução recente em tratamento de erros, autenticação e ajustes de infraestrutura.[3][5]
+O núcleo de investimentos está funcional. O backend responde corretamente, o ambiente Docker está estável, e os módulos principais do domínio de investimentos foram construídos e validados com dados reais.
 
 ### Módulos atuais
 
 | Módulo | Status | Observação |
 |---|---|---|
-| `auth` | Em andamento | Rota de login existente, mas fluxo de usuário inicial ainda precisa ser definido |
-| `asset-classes` | Funcional | Base para classificação dos ativos |
-| `assets` | Funcional | Cadastro e consulta de ativos já estruturados |
-| `transactions` | Funcional | CRUD principal construído |
-| `price-history` | Em andamento | Estrutura montada e integração em evolução |
-| `income-events` | Em andamento | Módulo existente, ainda em consolidação |
-| `portfolio-items` | Em andamento | Recalculo e consolidação em evolução |
-| `portfolio-snapshots` | Em andamento | Preparando base para visão temporal da carteira |
-| `users` | Planejado | Ainda não implementado |
-| `accounts` | Planejado | Importante para evolução futura |
-| `cash-transactions` | Planejado | Parte do domínio futuro de finanças pessoais |
-| `budgets` | Planejado | Parte do domínio futuro de finanças pessoais |
+| `core` | ✅ Funcional | Bootstrap, Prisma e configuração estáveis |
+| `shared` | ✅ Funcional | Erros, middlewares e utilitários padronizados |
+| `auth` | 🔄 Em andamento | Rota de login existente; fluxo completo de usuário pendente |
+| `institutions` | ✅ Funcional | CRUD implementado |
+| `accounts` | ✅ Funcional | CRUD implementado, vinculado a institutions |
+| `asset-classes` | ✅ Funcional | Base para classificação dos ativos |
+| `assets` | ✅ Funcional | Cadastro, consulta e metadados implementados |
+| `transactions` | ✅ Funcional | CRUD completo com validações |
+| `price-history` | ✅ Funcional | Histórico de preços via Yahoo Finance |
+| `income-events` | ✅ Funcional | CRUD de proventos implementado |
+| `dividends` | ✅ Funcional | Sync automático via Yahoo Finance: calcula `grossAmount = rate × qty` considerando a posição na data do pagamento |
+| `portfolio-items` | ✅ Funcional | Posição consolidada por ativo calculada e persistida |
+| `portfolio-snapshots` | 🔄 Em andamento | Estrutura montada; consolidação temporal em evolução |
+| `users` | 📋 Planejado | Ainda não implementado |
+| `cash-transactions` | 📋 Planejado | Domínio futuro de finanças pessoais |
+| `budgets` | 📋 Planejado | Domínio futuro de finanças pessoais |
 
-## Decisões arquiteturais atuais
+### Decisões técnicas relevantes
 
-Algumas decisões devem orientar o projeto daqui para frente para reduzir retrabalho.
+- **Prisma Decimal**: campos `Decimal` do Prisma retornam instâncias de `Prisma.Decimal`, não `number`. Toda leitura numérica deve usar `.toNumber()` antes de qualquer operação aritmética.
+- **Datas no banco**: campos `@db.Date` retornam objetos `Date` com hora `00:00:00.000Z`. Comparações com `lte`/`gte` no Prisma funcionam normalmente.
+- **Sync de dividendos**: o cálculo de `grossAmount` considera apenas transações do tipo `BUY`/`SELL` com `tradeDate <= paymentDate`. Eventos anteriores à primeira compra ficam com `grossAmount = 0` (comportamento esperado).
+- **Yahoo Finance**: dados de proventos são buscados pelo endpoint `/v8/finance/chart` com `events=dividends`. A tolerância de match entre `paymentDate` do evento e a data do Yahoo é de ±4 dias.
 
-- O SIG continuará como **monólito modular** nesta fase.[1][2]
-- O foco imediato permanece no **domínio de investimentos**.[3]
-- A autenticação deve ser simples no começo, mas já preparada para crescimento.
-- O frontend será construído depois que o núcleo backend estiver mais estável.
-- O domínio de finanças pessoais será adicionado como expansão, não como mistura precoce com investimentos.
+## Roadmap
 
-## Roadmap recomendado
-
-A ordem das entregas importa bastante para manter o projeto sob controle. O caminho mais seguro é evoluir por blocos de valor, fechando primeiro a base técnica e o núcleo funcional antes de abrir novos domínios.[5][3]
-
-### Fase 1 — Base técnica
+### Fase 1 — Base técnica ✅ Concluída
 
 - Estabilizar Docker e fluxo local.
 - Consolidar tratamento de erros.
 - Padronizar validações com Zod.
 - Fechar o fluxo mínimo de autenticação.
-- Manter CI rodando no GitHub Actions.
 
-### Fase 2 — Núcleo de investimentos
+### Fase 2 — Núcleo de investimentos ✅ Concluída
 
-- Fechar `price-history`.
-- Fechar `income-events`.
-- Consolidar `portfolio-items`.
-- Consolidar `portfolio-snapshots`.
-- Validar regras de cálculo da carteira.
+- Fechar `price-history`. ✅
+- Fechar `income-events`. ✅
+- Implementar sync de dividendos (`dividends`). ✅
+- Consolidar `portfolio-items`. ✅
+- Consolidar `portfolio-snapshots`. 🔄 Em andamento
 
 ### Fase 3 — Experiência do produto
 
-- Definir frontend inicial.
+- Fechar `portfolio-snapshots`.
+- Definir e iniciar o frontend.
 - Criar dashboard principal.
 - Criar telas de ativos, transações e posição.
 - Integrar autenticação no frontend.
@@ -167,8 +146,7 @@ A ordem das entregas importa bastante para manter o projeto sob controle. O cami
 ### Fase 4 — Módulos compartilhados
 
 - Criar `users`.
-- Criar `accounts`.
-- Criar `settings` e preferências.
+- Expandir `accounts` e `settings`.
 - Preparar base de categorias e relatórios.
 
 ### Fase 5 — Finanças pessoais
@@ -181,16 +159,11 @@ A ordem das entregas importa bastante para manter o projeto sob controle. O cami
 
 ## Como usar este README
 
-Este README deve funcionar como documento vivo do projeto. Sempre que um módulo mudar de estado, uma decisão arquitetural for tomada ou uma fase for concluída, o ideal é atualizar este arquivo para manter clareza técnica e continuidade do desenvolvimento.[6][7]
+Este README funciona como documento vivo do projeto. Sempre que um módulo mudar de estado, uma decisão técnica for tomada ou uma fase for concluída, atualizar este arquivo mantém a clareza e a continuidade do desenvolvimento.
 
 Checklist de atualização recomendada:
 
 - Atualizar status dos módulos.
 - Registrar novos módulos criados.
+- Registrar decisões técnicas relevantes.
 - Ajustar roadmap quando a prioridade mudar.
-- Registrar mudanças importantes na stack.
-- Manter instruções de ambiente atualizadas.
-
-## Próximo passo recomendado
-
-O próximo passo mais coerente com a fase atual do SIG é consolidar o núcleo de investimentos antes de abrir a frente de usuários, frontend ou finanças pessoais. Em termos práticos, isso significa priorizar a conclusão de `price-history`, `income-events`, `portfolio-items` e `portfolio-snapshots`, pois esses módulos fecham a lógica central da carteira e sustentam o valor do produto desde já.[1][2]
