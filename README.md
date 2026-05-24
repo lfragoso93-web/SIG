@@ -1,207 +1,226 @@
-# SIG — Sistema de Gestão de Investimentos
+# Sistema de Investimentos — API
 
-Projeto pessoal em evolução para um sistema modular de gestão de carteira de investimentos, com visão de longo prazo para expansão em gestão financeira pessoal. A direção arquitetural mais adequada para o estágio atual é um **monólito modular**: um único sistema por enquanto, mas organizado por domínios de negócio claros, reduzindo complexidade operacional e facilitando crescimento futuro.
+API REST para gestão e acompanhamento de portfólio de investimentos. Construída com Node.js, Express, TypeScript, Prisma e PostgreSQL.
 
-## Visão do produto
+***
 
-O objetivo atual do SIG é consolidar a gestão de carteira de investimentos em um único sistema, cobrindo cadastro de ativos, transações, histórico de preços, eventos de renda, posição consolidada e snapshots da carteira. A visão futura é expandir a mesma base para um sistema mais amplo de finanças pessoais, aproveitando módulos compartilhados e evitando retrabalho estrutural.
+## Stack
 
-## Stack atual
+| Camada | Tecnologia |
+|--------|------------|
+| Runtime | Node.js 22 |
+| Framework | Express 5 |
+| Linguagem | TypeScript 5 |
+| ORM | Prisma 6 |
+| Banco de dados | PostgreSQL 15 |
+| Autenticação | JWT (Bearer) |
+| Containerização | Docker + Docker Compose |
+| CI/CD | GitHub Actions (CodeQL + Dependabot) |
 
-| Camada | Tecnologia | Papel no sistema |
-|---|---|---|
-| Backend | Node.js + Express + TypeScript | API, regras de negócio e organização modular |
-| ORM | Prisma | Acesso ao banco e modelagem de dados |
-| Banco | PostgreSQL | Persistência dos dados |
-| Infra local | Docker Compose | Ambiente de desenvolvimento com API e banco |
-| Validação | Zod | Validação de payloads e entradas |
-| Integrações | Yahoo Finance | Preços históricos e eventos de proventos |
-| Jobs | node-cron | Crons de snapshot WEEKLY e DAILY |
-| Futuro frontend | Ainda em definição | Camada visual do produto |
+***
 
-## Arquitetura modular
+## Módulos
 
-A arquitetura do SIG é guiada por domínios, e não por telas isoladas ou por endpoints soltos. Há três camadas: a base do sistema (reutilizável por qualquer domínio), o domínio de investimentos (foco atual) e o domínio futuro de finanças pessoais.
+| Módulo | Descrição |
+|--------|-----------|
+| `auth` | Registro, login e refresh de token JWT |
+| `asset-classes` | Classes de ativos com alocação-alvo |
+| `assets` | Cadastro de ativos (ações, FIIs, renda fixa, etc.) |
+| `transactions` | Compras, vendas, bonificações e desdobramentos |
+| `price-history` | Histórico de preços de fechamento |
+| `income-events` | Dividendos, JCP e rendimentos |
+| `portfolio-items` | Posição atual calculada por ativo |
+| `portfolio-snapshots` | Snapshots periódicos do portfólio (DAILY / WEEKLY) |
+| `allocation` | Alocação atual vs. alvo por classe |
+| `performance` | Retorno, volatilidade e métricas de desempenho |
+| `dividends` | Consolidação de proventos recebidos |
 
-### 1. Base do sistema
+***
 
-- `auth`: login, emissão e validação de token.
-- `users`: usuários do sistema, perfis e preferências.
-- `settings`: parâmetros globais do sistema.
-- `institutions`: corretoras, bancos e instituições financeiras.
-- `accounts`: contas de investimento e contas bancárias.
-- `shared`: erros, middlewares, utilitários, constantes e helpers reutilizáveis.
-- `core`: bootstrap do servidor, configuração e Prisma.
+## Portfolio Snapshots
 
-### 2. Domínio de investimentos
+Snapshots capturam o estado completo do portfólio em uma data de referência. Suportam dois períodos:
 
-- `asset-classes`: classes de ativos.
-- `assets`: cadastro e metadados dos ativos.
-- `transactions`: compras, vendas e movimentações.
-- `price-history`: histórico de preços via Yahoo Finance.
-- `income-events`: dividendos, juros, rendimentos e proventos.
-- `dividends`: sync automático de proventos via Yahoo Finance.
-- `portfolio-items`: posição consolidada por ativo.
-- `portfolio-snapshots`: snapshots semanais e diários da carteira por data.
-- `jobs`: crons agendados (snapshot WEEKLY e DAILY).
+- **DAILY** — um snapshot por dia útil (seg–sex), gerado automaticamente às 18:30 BRT
+- **WEEKLY** — um snapshot por semana (sexta-feira), gerado automaticamente às 18:00 BRT
 
-### 3. Domínio futuro de finanças pessoais
+### Endpoints
 
-- `categories`: categorias financeiras.
-- `cash-transactions`: receitas, despesas e transferências.
-- `budgets`: orçamento mensal.
-- `recurring-payments`: lançamentos recorrentes.
-- `cards`: cartões e faturas.
-- `reports`: relatórios consolidados de vida financeira.
-- `goals`: metas financeiras e planejamento.
-
-## Estrutura de pastas
-
-```text
-src/
-  core/
-    prisma/
-    config/
-    server/
-  shared/
-    errors/
-    middleware/
-    utils/
-    constants/
-  providers/
-    yahoo/              # cliente Yahoo Finance (preços históricos e proventos)
-  jobs/
-    snapshot.cron.ts   # crons WEEKLY e DAILY de snapshots
-  modules/
-    auth/
-    users/
-    settings/
-    institutions/
-    accounts/
-    asset-classes/
-    assets/
-    transactions/
-    price-history/
-    income-events/
-    dividends/
-    portfolio-items/
-    portfolio-snapshots/
-    categories/           # futuro
-    cash-transactions/    # futuro
-    budgets/              # futuro
-    reports/              # futuro
+```
+POST /portfolio-snapshots/generate
+POST /portfolio-snapshots/generate-range
+GET  /portfolio-snapshots
+GET  /portfolio-snapshots/:date
 ```
 
-## Estado atual do sistema
+### Geração de um snapshot único
 
-O núcleo de investimentos está funcional. O backend responde corretamente, o ambiente Docker está estável, e os módulos principais do domínio de investimentos foram construídos e validados com dados reais.
+```http
+POST /portfolio-snapshots/generate
+Content-Type: application/json
+Authorization: Bearer <token>
 
-### Módulos atuais
+{
+  "referenceDate": "2026-05-23",
+  "period": "DAILY"
+}
+```
 
-| Módulo | Status | Observação |
-|---|---|---|
-| `core` | ✅ Funcional | Bootstrap, Prisma e configuração estáveis |
-| `shared` | ✅ Funcional | Erros, middlewares e utilitários padronizados |
-| `auth` | 🔄 Em andamento | Rota de login existente; fluxo completo de usuário pendente |
-| `institutions` | ✅ Funcional | CRUD implementado |
-| `accounts` | ✅ Funcional | CRUD implementado, vinculado a institutions |
-| `asset-classes` | ✅ Funcional | Base para classificação dos ativos |
-| `assets` | ✅ Funcional | Cadastro, consulta e metadados implementados |
-| `transactions` | ✅ Funcional | CRUD completo; dispara regeneração do snapshot WEEKLY da semana após create/update/delete |
-| `price-history` | ✅ Funcional | Histórico de preços via Yahoo Finance; importação individual e em lote; usa `closePrice` (preço nominal) |
-| `income-events` | ✅ Funcional | CRUD de proventos implementado |
-| `dividends` | ✅ Funcional | Sync automático via Yahoo Finance: calcula `grossAmount = rate × qty` considerando a posição na data do pagamento |
-| `portfolio-items` | ✅ Funcional | Posição consolidada por ativo calculada e persistida |
-| `portfolio-snapshots` | ✅ Funcional | Snapshots WEEKLY (sextas-feiras) e DAILY (dias úteis); preço de fechamento por ativo; feriados sem preço são pulados automaticamente |
-| `jobs` | ✅ Funcional | Cron WEEKLY: sextas 18h BRT; Cron DAILY: seg–sex 18h30 BRT; backfill disponível via `backfillDailySnapshots()` |
-| `users` | 📋 Planejado | Ainda não implementado |
-| `cash-transactions` | 📋 Planejado | Domínio futuro de finanças pessoais |
-| `budgets` | 📋 Planejado | Domínio futuro de finanças pessoais |
+### Backfill de um intervalo
 
-### Decisões técnicas relevantes
+```http
+POST /portfolio-snapshots/generate-range
+Content-Type: application/json
+Authorization: Bearer <token>
 
-- **Prisma Decimal**: campos `Decimal` do Prisma retornam instâncias de `Prisma.Decimal`, não `number`. Toda leitura numérica deve usar `.toNumber()` antes de qualquer operação aritmética.
-- **Datas no banco**: campos `@db.Date` retornam objetos `Date` com hora `00:00:00.000Z`. Comparações com `lte`/`gte` no Prisma funcionam normalmente.
-- **Sync de dividendos**: o cálculo de `grossAmount` considera apenas transações do tipo `BUY`/`SELL` com `tradeDate <= paymentDate`. Eventos anteriores à primeira compra ficam com `grossAmount = 0` (comportamento esperado).
-- **Yahoo Finance — preços**: dados históricos buscados via `/v8/finance/chart` com `interval=1d`. O campo `closePrice` (preço nominal) é gravado e usado nos snapshots; `adjustedClose` é gravado no banco mas não é lido — decisão intencional para manter consistência entre preço de mercado e custo médio, ambos nominais.
-- **Yahoo Finance — proventos**: dados buscados com `events=dividends`. A tolerância de match entre `paymentDate` do evento e a data retornada pelo Yahoo é de ±4 dias.
-- **Snapshots DAILY e feriados**: o cron DAILY verifica se existe ao menos um `PriceHistory` com `priceDate` igual ao dia antes de gerar o snapshot. Se não houver (feriado ou dia sem pregão), retorna `null` e o cron pula silenciosamente.
-- **Snapshot DAILY — ativo sem preço no dia**: ativos que não tiveram negociação em um dia específico usam `investedAmount` como `marketValue` (sem distorção para zero). Quando o preço chega no próximo pregão, o snapshot do dia correto usa o `closePrice` real.
-- **Trigger pós-transação**: create/update/delete em `transactions` dispara `generateSnapshot(tradeDate, 'WEEKLY')` de forma assíncrona (fire-and-forget). Erros são logados mas não propagados para a resposta da API.
-- **@types/express v5**: `req.query.*` retorna `string | string[] | ParsedQs` nessa versão. Sempre fazer cast explícito para `string | undefined` antes de usar como argumento tipado.
-- **Splits e grupamentos**: o sistema **não detecta corporate actions automaticamente**. Desdobramentos e grupamentos devem ser registrados manualmente como transações do tipo `SPLIT` / `REVERSE_SPLIT`. Mudanças de ticker (ex: PETZ3 → AUAU3 após incorporação) também são tratadas manualmente via atualização direta no banco.
-- **Ticker no Yahoo Finance**: ativos brasileiros são consultados com sufixo `.SA` (ex: `PETR4.SA`). O cliente Yahoo adiciona o sufixo automaticamente se ausente.
+{
+  "startDate": "2024-01-15",
+  "endDate":   "2026-05-23",
+  "period":    "DAILY"
+}
+```
 
-## Segurança e CI
+Resposta:
+```json
+{
+  "generated": 590,
+  "errors": [],
+  "snapshots": [...]
+}
+```
 
-O repositório conta com três camadas de segurança automatizadas:
+> **Nota:** Para `DAILY`, dias sem preços disponíveis (feriados e fins de semana) são pulados silenciosamente.
 
-| Ferramenta | Quando roda | O que verifica |
-|---|---|---|
-| **CodeQL** | Push/PR para `main` + toda segunda | Análise estática TypeScript (`security-extended`) |
-| **npm audit** | Mudança em `package*.json` + toda segunda | Vulnerabilidades `moderate` ou acima nas dependências |
-| **Dependabot** | Toda segunda | Abre PRs para atualizar npm, Docker e GitHub Actions |
+### Crons automáticos
 
-Resultados do CodeQL aparecem em **Security → Code scanning alerts** no repositório. O Dependabot abre PRs com label `dependencies`/`security` e revisão atribuída ao mantenedor.
+Os jobs são registrados no startup da aplicação via `node-cron`:
 
-## Roadmap
+| Job | Schedule (UTC) | Horário BRT |
+|-----|---------------|-------------|
+| WEEKLY | `0 21 * * 5` | Sexta-feira 18:00 |
+| DAILY | `30 21 * * 1-5` | Seg–Sex 18:30 |
 
-### Fase 1 — Base técnica ✅ Concluída
+***
 
-- Estabilizar Docker e fluxo local.
-- Consolidar tratamento de erros.
-- Padronizar validações com Zod.
-- Fechar o fluxo mínimo de autenticação.
+## Configuração
 
-### Fase 2 — Núcleo de investimentos ✅ Concluída
+### Pré-requisitos
 
-- Fechar `price-history` com Yahoo Finance. ✅
-- Fechar `income-events`. ✅
-- Implementar sync de dividendos (`dividends`). ✅
-- Consolidar `portfolio-items`. ✅
-- Consolidar `portfolio-snapshots`. ✅
+- Docker e Docker Compose
+- Node.js 22+ (desenvolvimento local)
 
-### Fase 3 — Automação e qualidade ✅ Concluída
+### Variáveis de ambiente
 
-- Cron WEEKLY (sextas 18h BRT) e DAILY (seg–sex 18h30 BRT). ✅
-- Trigger pós-transação para regenerar snapshot da semana. ✅
-- Snapshot DAILY com skip automático de feriados. ✅
-- CodeQL + npm audit + Dependabot no CI. ✅
+Crie um arquivo `.env` na raiz do projeto:
 
-### Fase 4 — Experiência do produto
+```env
+DATABASE_URL=postgresql://user:password@db:5432/investimentos
+JWT_SECRET=sua_chave_secreta
+JWT_REFRESH_SECRET=sua_chave_refresh
+CORS_ORIGIN=http://localhost:5173
+PORT=3001
+```
 
-- Definir e iniciar o frontend.
-- Criar dashboard principal.
-- Criar telas de ativos, transações e posição.
-- Integrar autenticação no frontend.
+### Subir com Docker
 
-### Fase 5 — Módulos compartilhados
+```bash
+docker compose up -d
+```
 
-- Criar `users`.
-- Expandir `accounts` e `settings`.
-- Preparar base de categorias e relatórios.
+A API ficará disponível em `http://localhost:3000`.
 
-### Fase 6 — Finanças pessoais
+### Desenvolvimento local
 
-- Implementar receitas e despesas.
-- Implementar orçamento mensal.
-- Implementar recorrências.
-- Implementar relatórios financeiros pessoais.
-- Integrar visão patrimonial total com investimentos.
+```bash
+npm install
+npx prisma migrate deploy
+npm run dev
+```
 
-### Backlog técnico (sem prioridade definida)
+***
 
-- Corporate actions automáticos: detecção de splits, grupamentos e mudanças de ticker via Yahoo Finance.
-- Backfill de snapshots DAILY para o histórico completo da carteira.
-- Fluxo completo de autenticação (`users`, refresh token, permissões).
+## Migrations
 
-## Como usar este README
+O projeto usa Prisma Migrate para versionamento do schema. As migrations ficam em `prisma/migrations/`.
 
-Este README funciona como documento vivo do projeto. Sempre que um módulo mudar de estado, uma decisão técnica for tomada ou uma fase for concluída, atualizar este arquivo mantém a clareza e a continuidade do desenvolvimento.
+```bash
+# Aplicar migrations pendentes
+npx prisma migrate deploy
 
-Checklist de atualização recomendada:
+# Criar nova migration
+npx prisma migrate dev --name descricao_da_mudanca
+```
 
-- Atualizar status dos módulos.
-- Registrar novos módulos criados.
-- Registrar decisões técnicas relevantes.
-- Ajustar roadmap quando a prioridade mudar.
+### Histórico de migrations
+
+| Migration | Data |
+|-----------|------|
+| `20260517022440_init` | 2026-05-17 |
+| `20260518004626_adjust_asset_class_structure` | 2026-05-18 |
+| `20260519003806_add_transaction_status_and_refine_transaction_type` | 2026-05-19 |
+| `20260519124438_make_transaction_account_optional` | 2026-05-19 |
+| `20260520213443_add_income_event_fields` | 2026-05-20 |
+| `20260521_portfolio_item_account_optional` | 2026-05-21 |
+
+***
+
+## CI/CD
+
+- **CodeQL** — análise estática de segurança a cada push/PR
+- **Dependabot** — atualizações automáticas de dependências npm e GitHub Actions
+
+***
+
+## Próximos Passos
+
+### Alta prioridade
+
+- [ ] **Importação automática de preços** — integração com API de cotações (ex: Yahoo Finance, BRAPI) para popular `PriceHistory` automaticamente via cron diário
+- [ ] **Importação de proventos** — busca automática de dividendos e JCP declarados para os ativos da carteira
+- [ ] **Frontend — gráfico de evolução diária** — consumir os snapshots DAILY para exibir curva de patrimônio e rentabilidade no dashboard
+
+### Média prioridade
+
+- [ ] **Cálculo de IRR / XIRR** — retorno interno da carteira considerando aportes e retiradas ao longo do tempo
+- [ ] **Benchmark comparison** — comparar rentabilidade do portfólio contra CDI, IBOV e IPCA
+- [ ] **Relatório mensal PDF** — exportar extrato consolidado com posição, proventos e rentabilidade do mês
+- [ ] **Alertas de rebalanceamento** — notificar quando a alocação atual desviar mais de X% da alocação-alvo
+
+### Baixa prioridade / Melhorias
+
+- [ ] **Testes automatizados** — cobertura de unit tests nos services e integration tests nos endpoints críticos
+- [ ] **Rate limiting** — proteção nos endpoints públicos e de geração de snapshots
+- [ ] **Paginação nos listSnapshots** — cursor-based pagination para carteiras com histórico longo
+- [ ] **Suporte a múltiplas contas/corretoras** — segregar posições por conta dentro do mesmo portfólio
+
+***
+
+## Estrutura do Projeto
+
+```
+src/
+├── core/
+│   └── prisma/          # Cliente Prisma singleton
+├── jobs/
+│   └── snapshot.cron.ts # Crons DAILY e WEEKLY
+├── modules/
+│   ├── auth/
+│   ├── asset-classes/
+│   ├── assets/
+│   ├── transactions/
+│   ├── price-history/
+│   ├── income-events/
+│   ├── portfolio-items/
+│   ├── portfolio-snapshots/
+│   ├── allocation/
+│   ├── performance/
+│   └── dividends/
+└── shared/
+    └── middleware/      # authenticate, errorHandler
+```
+
+***
+
+## Licença
+
+Uso privado.
