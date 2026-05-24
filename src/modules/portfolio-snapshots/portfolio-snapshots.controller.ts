@@ -54,7 +54,10 @@ export const listSnapshotsHandler = async (req: Request, res: Response) => {
 
 export const getSnapshotByDateHandler = async (req: Request, res: Response) => {
   const period = req.query.period as string | undefined;
-  const snap = await getSnapshotByDate(new Date(req.params.date), parsePeriod(period));
+  const snap = await getSnapshotByDate(
+    new Date(req.params.date as string),  // ← cast aqui
+    parsePeriod(period),
+  );
   if (!snap) {
     res.status(404).json({ error: 'Snapshot não encontrado.' });
     return;
