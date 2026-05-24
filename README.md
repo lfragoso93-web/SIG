@@ -1,135 +1,101 @@
-# Sistema de Investimentos — API
+# SIG — Sistema de Investimentos e Gestão
 
-API REST para gestão e acompanhamento de portfólio de investimentos. Construída com Node.js, Express, TypeScript, Prisma e PostgreSQL.
+API REST para controle e acompanhamento de carteiras de investimentos. Permite cadastrar ativos, registrar transações, importar histórico de preços e proventos, calcular snapshots do portfólio e medir performance.
 
-***
+---
 
-## Stack
+## Tecnologias
 
 | Camada | Tecnologia |
-|--------|------------|
-| Runtime | Node.js 22 |
-| Framework | Express 5 |
-| Linguagem | TypeScript 5 |
+|---|---|
+| Runtime | Node.js 20 + TypeScript |
+| Framework | Express 4 |
 | ORM | Prisma 6 |
-| Banco de dados | PostgreSQL 15 |
-| Autenticação | JWT (Bearer) |
-| Containerização | Docker + Docker Compose |
-| CI/CD | GitHub Actions (CodeQL + Dependabot) |
+| Banco de dados | PostgreSQL 16 |
+| Agendamento | node-cron |
+| Cotações | BRAPI (B3) + Yahoo Finance (internacionais) |
+| Containerização | Docker Compose |
+| Autenticação | JWT (Bearer token) |
 
-***
+---
 
-## Módulos
-
-| Módulo | Descrição |
-|--------|-----------|
-| `auth` | Registro, login e refresh de token JWT |
-| `asset-classes` | Classes de ativos com alocação-alvo |
-| `assets` | Cadastro de ativos (ações, FIIs, renda fixa, etc.) |
-| `transactions` | Compras, vendas, bonificações e desdobramentos |
-| `price-history` | Histórico de preços de fechamento |
-| `income-events` | Dividendos, JCP e rendimentos |
-| `portfolio-items` | Posição atual calculada por ativo |
-| `portfolio-snapshots` | Snapshots periódicos do portfólio (DAILY / WEEKLY) |
-| `allocation` | Alocação atual vs. alvo por classe |
-| `performance` | Retorno, volatilidade e métricas de desempenho |
-| `dividends` | Consolidação de proventos recebidos |
-
-***
-
-## Portfolio Snapshots
-
-Snapshots capturam o estado completo do portfólio em uma data de referência. Suportam dois períodos:
-
-- **DAILY** — um snapshot por dia útil (seg–sex), gerado automaticamente às 18:30 BRT
-- **WEEKLY** — um snapshot por semana (sexta-feira), gerado automaticamente às 18:00 BRT
-
-### Endpoints
+## Estrutura do Projeto
 
 ```
-POST /portfolio-snapshots/generate
-POST /portfolio-snapshots/generate-range
-GET  /portfolio-snapshots
-GET  /portfolio-snapshots/:date
+src/
+├── index.ts                        # Entry point — Express + crons
+├── core/
+│   └── prisma/prisma.service.ts    # Instância singleton do PrismaClient
+├── jobs/
+│   ├── snapshot.cron.ts            # Cron de snapshots diário/semanal/mensal
+│   └── price-import.cron.ts        # Cron de importação de preços (5x/dia)
+├── modules/
+│   ├── auth/                       # Login e geração de JWT
+│   ├── asset-classes/              # Classes de ativos (Ação, FII, ETF…)
+│   ├── assets/                     # Cadastro de ativos
+│   ├── transactions/               # Compras e vendas
+│   ├── price-history/              # Histórico de preços + importação BRAPI
+│   ├── income-events/              # Proventos (dividendos, JCP, rendimentos)
+│   ├── portfolio-items/            # Posição consolidada por ativo
+│   ├── portfolio-snapshots/        # Snapshots DAILY / WEEKLY / MONTHLY
+│   ├── allocation/                 # Distribuição da carteira por classe
+│   ├── performance/                # Performance e rentabilidade
+│   └── dividends/                  # Resumo de proventos recebidos
+├── providers/
+│   └── brapi/brapi.client.ts       # BRAPI + Yahoo Finance (histórico, cotação, dividendos)
+└── shared/
+    ├── constants/                  # Constantes globais
+    ├── errors/                     # Classes de erro customizadas
+    ├── middleware/                 # authenticate, errorHandler
+    └── utils/                      # Utilitários compartilhados
+prisma/
+├── schema.prisma                   # Schema do banco de dados
+└── migrations/                     # Migrações geradas pelo Prisma
 ```
 
-### Geração de um snapshot único
+---
 
-```http
-POST /portfolio-snapshots/generate
-Content-Type: application/json
-Authorization: Bearer <token>
+## Variáveis de Ambiente
 
-{
-  "referenceDate": "2026-05-23",
-  "period": "DAILY"
-}
-```
-
-### Backfill de um intervalo
-
-```http
-POST /portfolio-snapshots/generate-range
-Content-Type: application/json
-Authorization: Bearer <token>
-
-{
-  "startDate": "2024-01-15",
-  "endDate":   "2026-05-23",
-  "period":    "DAILY"
-}
-```
-
-Resposta:
-```json
-{
-  "generated": 590,
-  "errors": [],
-  "snapshots": [...]
-}
-```
-
-> **Nota:** Para `DAILY`, dias sem preços disponíveis (feriados e fins de semana) são pulados silenciosamente.
-
-### Crons automáticos
-
-Os jobs são registrados no startup da aplicação via `node-cron`:
-
-| Job | Schedule (UTC) | Horário BRT |
-|-----|---------------|-------------|
-| WEEKLY | `0 21 * * 5` | Sexta-feira 18:00 |
-| DAILY | `30 21 * * 1-5` | Seg–Sex 18:30 |
-
-***
-
-## Configuração
-
-### Pré-requisitos
-
-- Docker e Docker Compose
-- Node.js 22+ (desenvolvimento local)
-
-### Variáveis de ambiente
-
-Crie um arquivo `.env` na raiz do projeto:
+Copie `.env.example` para `.env` e preencha:
 
 ```env
-DATABASE_URL=postgresql://user:password@db:5432/investimentos
-JWT_SECRET=sua_chave_secreta
-JWT_REFRESH_SECRET=sua_chave_refresh
-CORS_ORIGIN=http://localhost:5173
+# Banco de dados
+DATABASE_URL="postgresql://user:password@localhost:5432/sig"
+
+# JWT
+JWT_SECRET="sua-chave-secreta"
+JWT_EXPIRES_IN="7d"
+
+# BRAPI
+BRAPI_TOKEN="seu-token-brapi"
+BRAPI_BASE_URL="https://brapi.dev/api"   # opcional
+
+# Servidor
 PORT=3001
+CORS_ORIGIN="http://localhost:5173"
 ```
 
-### Subir com Docker
+> ⚠️ Sem `CORS_ORIGIN` definido, a API aceita qualquer origem (`*`). Sempre defina em produção.
+
+---
+
+## Instalação e Execução
+
+### Com Docker (recomendado)
 
 ```bash
+# Subir banco + API
 docker compose up -d
+
+# Rodar migrações
+docker compose exec api npx prisma migrate deploy
+
+# Acompanhar logs
+docker compose logs -f api
 ```
 
-A API ficará disponível em `http://localhost:3000`.
-
-### Desenvolvimento local
+### Local
 
 ```bash
 npm install
@@ -137,90 +103,216 @@ npx prisma migrate deploy
 npm run dev
 ```
 
-***
+---
 
-## Migrations
+## Endpoints
 
-O projeto usa Prisma Migrate para versionamento do schema. As migrations ficam em `prisma/migrations/`.
-
-```bash
-# Aplicar migrations pendentes
-npx prisma migrate deploy
-
-# Criar nova migration
-npx prisma migrate dev --name descricao_da_mudanca
+Todos os endpoints (exceto `/auth/*` e `/health`) exigem header:
+```
+Authorization: Bearer <token>
 ```
 
-### Histórico de migrations
+### Auth
+| Método | Rota | Descrição |
+|---|---|---|
+| POST | `/auth/register` | Criar conta |
+| POST | `/auth/login` | Login — retorna JWT |
 
-| Migration | Data |
-|-----------|------|
-| `20260517022440_init` | 2026-05-17 |
-| `20260518004626_adjust_asset_class_structure` | 2026-05-18 |
-| `20260519003806_add_transaction_status_and_refine_transaction_type` | 2026-05-19 |
-| `20260519124438_make_transaction_account_optional` | 2026-05-19 |
-| `20260520213443_add_income_event_fields` | 2026-05-20 |
-| `20260521_portfolio_item_account_optional` | 2026-05-21 |
+### Ativos
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/assets` | Listar ativos |
+| POST | `/assets` | Criar ativo |
+| GET | `/assets/:id` | Detalhe do ativo |
+| PUT | `/assets/:id` | Atualizar ativo |
+| DELETE | `/assets/:id` | Remover ativo |
 
-***
+### Classes de Ativos
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/asset-classes` | Listar classes |
+| POST | `/asset-classes` | Criar classe |
+| PUT | `/asset-classes/:id` | Atualizar classe |
+| DELETE | `/asset-classes/:id` | Remover classe |
 
-## CI/CD
+### Transações
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/transactions` | Listar transações |
+| POST | `/transactions` | Registrar transação |
+| GET | `/transactions/:id` | Detalhe |
+| PUT | `/transactions/:id` | Atualizar |
+| DELETE | `/transactions/:id` | Remover |
 
-- **CodeQL** — análise estática de segurança a cada push/PR
-- **Dependabot** — atualizações automáticas de dependências npm e GitHub Actions
+### Histórico de Preços
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/price-history` | Listar registros |
+| GET | `/price-history/:assetId` | Por ativo |
+| POST | `/price-history/import/:ticker` | Importar histórico via BRAPI |
 
-***
+**Body da importação:**
+```json
+{
+  "interval": "1d",
+  "range": "1y"
+}
+```
+Ou por datas:
+```json
+{
+  "interval": "1d",
+  "startDate": "2024-01-01",
+  "endDate": "2024-12-31"
+}
+```
+
+### Eventos de Renda (Proventos)
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/income-events` | Listar proventos |
+| POST | `/income-events` | Registrar provento |
+| PUT | `/income-events/:id` | Atualizar |
+| DELETE | `/income-events/:id` | Remover |
+
+### Itens do Portfólio
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/portfolio-items` | Posição consolidada de todos os ativos |
+| GET | `/portfolio-items/:assetId` | Posição de um ativo |
+
+### Snapshots do Portfólio
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/portfolio-snapshots` | Listar snapshots |
+| GET | `/portfolio-snapshots/:id` | Detalhe do snapshot |
+| POST | `/portfolio-snapshots/generate` | Gerar snapshot manual |
+| POST | `/portfolio-snapshots/generate-range` | Gerar snapshots em range |
+
+**Body do generate-range:**
+```json
+{
+  "startDate": "2026-01-01",
+  "endDate": "2026-05-23",
+  "period": "DAILY"
+}
+```
+`period`: `DAILY` | `WEEKLY` | `MONTHLY`
+
+### Alocação
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/allocation` | Distribuição da carteira por classe de ativo |
+
+### Performance
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/performance` | Rentabilidade da carteira |
+
+### Dividendos
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/dividends` | Resumo de proventos recebidos |
+
+### Health
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/health` | Status da API |
+
+---
+
+## Jobs Automáticos (Crons)
+
+### Importação de Preços — `price-import.cron.ts`
+
+Roda **5x por dia, segunda a sexta**, em horário de pregão B3:
+
+| Horário BRT | Horário UTC | Cron |
+|---|---|---|
+| 10:00 | 13:00 | `0 13 * * 1-5` |
+| 11:30 | 14:30 | `30 14 * * 1-5` |
+| 13:00 | 16:00 | `0 16 * * 1-5` |
+| 15:00 | 18:00 | `0 18 * * 1-5` |
+| 17:30 | 20:30 | `30 20 * * 1-5` |
+
+- **Ativos BRL** → BRAPI (batch, até 50 tickers por chamada)
+- **Ativos não-BRL** → Yahoo Finance (individual)
+- Faz `upsert` em `PriceHistory` para a data de hoje
+
+**Executar manualmente:**
+```bash
+docker compose exec api node -e "
+const { importCurrentPrices } = require('./dist/jobs/price-import.cron');
+importCurrentPrices().then(r => console.log(JSON.stringify(r, null, 2)));
+"
+```
+
+### Snapshots do Portfólio — `snapshot.cron.ts`
+
+| Frequência | Horário BRT | Descrição |
+|---|---|---|
+| Diário | 23:00 (seg–sex) | Snapshot `DAILY` |
+| Semanal | Sex 23:30 | Snapshot `WEEKLY` |
+| Mensal | Último dia do mês 23:59 | Snapshot `MONTHLY` |
+
+---
+
+## Provedores de Dados
+
+### BRAPI (`brapi.client.ts`)
+
+| Método | Descrição |
+|---|---|
+| `getHistoricalPrices(params)` | Histórico OHLCV de um ticker |
+| `getCurrentPrices(tickers[])` | Cotação atual em batch (até 50 tickers) |
+| `getYahooCurrentPrice(ticker)` | Cotação atual via Yahoo Finance |
+| `getDividends(ticker)` | Dividendos históricos via Yahoo Finance |
+
+---
+
+## Banco de Dados
+
+```bash
+# Gerar nova migração após alterar schema.prisma
+npx prisma migrate dev --name descricao-da-mudanca
+
+# Aplicar migrações em produção
+npx prisma migrate deploy
+
+# Abrir Prisma Studio
+npx prisma studio
+```
+
+---
 
 ## Próximos Passos
 
-### Alta prioridade
+### Alta Prioridade
+- [ ] **Importação automática de proventos** — cron semanal para buscar dividendos/JCP declarados dos ativos da carteira
+- [ ] **Frontend — gráfico de evolução** — consumir `GET /portfolio-snapshots` para renderizar curva de patrimônio (590+ snapshots DAILY disponíveis)
+- [ ] **Corrigir warning `CORS_ORIGIN`** — garantir que a variável está definida no `.env` de produção
 
-- [ ] **Importação automática de preços** — integração com API de cotações (ex: Yahoo Finance, BRAPI) para popular `PriceHistory` automaticamente via cron diário
-- [ ] **Importação de proventos** — busca automática de dividendos e JCP declarados para os ativos da carteira
-- [ ] **Frontend — gráfico de evolução diária** — consumir os snapshots DAILY para exibir curva de patrimônio e rentabilidade no dashboard
+### Média Prioridade
+- [ ] **IRR/XIRR** — retorno real da carteira considerando timing dos aportes
+- [ ] **Benchmark** — comparar rentabilidade vs. CDI, IBOV e IPCA
+- [ ] **Testes automatizados** — cobertura mínima nos services críticos (snapshots, portfolio-items, price-import)
 
-### Média prioridade
+### Baixa Prioridade
+- [ ] **Rate limiting** — proteção por IP nos endpoints públicos
+- [ ] **Logs estruturados** — substituir `console.log` por Winston/Pino
+- [ ] **CI/CD** — pipeline GitHub Actions para lint + build + testes
 
-- [ ] **Cálculo de IRR / XIRR** — retorno interno da carteira considerando aportes e retiradas ao longo do tempo
-- [ ] **Benchmark comparison** — comparar rentabilidade do portfólio contra CDI, IBOV e IPCA
-- [ ] **Relatório mensal PDF** — exportar extrato consolidado com posição, proventos e rentabilidade do mês
-- [ ] **Alertas de rebalanceamento** — notificar quando a alocação atual desviar mais de X% da alocação-alvo
+---
 
-### Baixa prioridade / Melhorias
+## Contribuindo
 
-- [ ] **Testes automatizados** — cobertura de unit tests nos services e integration tests nos endpoints críticos
-- [ ] **Rate limiting** — proteção nos endpoints públicos e de geração de snapshots
-- [ ] **Paginação nos listSnapshots** — cursor-based pagination para carteiras com histórico longo
-- [ ] **Suporte a múltiplas contas/corretoras** — segregar posições por conta dentro do mesmo portfólio
+```bash
+# Criar branch de feature
+git checkout -b feat/nome-da-feature
 
-***
+# Commitar seguindo Conventional Commits
+git commit -m "feat(module): descrição da mudança"
 
-## Estrutura do Projeto
-
+# Push e abrir PR para main
+git push origin feat/nome-da-feature
 ```
-src/
-├── core/
-│   └── prisma/          # Cliente Prisma singleton
-├── jobs/
-│   └── snapshot.cron.ts # Crons DAILY e WEEKLY
-├── modules/
-│   ├── auth/
-│   ├── asset-classes/
-│   ├── assets/
-│   ├── transactions/
-│   ├── price-history/
-│   ├── income-events/
-│   ├── portfolio-items/
-│   ├── portfolio-snapshots/
-│   ├── allocation/
-│   ├── performance/
-│   └── dividends/
-└── shared/
-    └── middleware/      # authenticate, errorHandler
-```
-
-***
-
-## Licença
-
-Uso privado.
