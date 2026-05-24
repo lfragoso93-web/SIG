@@ -8,7 +8,7 @@ API REST para controle e acompanhamento de carteiras de investimentos. Permite c
 
 | Camada | Tecnologia |
 |---|---|
-| Runtime | Node.js 20 + TypeScript |
+| Runtime | Node.js 22 + TypeScript |
 | Framework | Express 4 |
 | ORM | Prisma 6 |
 | Banco de dados | PostgreSQL 16 |
@@ -28,7 +28,8 @@ src/
 │   └── prisma/prisma.service.ts    # Instância singleton do PrismaClient
 ├── jobs/
 │   ├── snapshot.cron.ts            # Cron de snapshots diário/semanal/mensal
-│   └── price-import.cron.ts        # Cron de importação de preços (5x/dia)
+│   ├── price-import.cron.ts        # Cron de importação de preços (5x/dia)
+│   └── income-import.cron.ts       # Cron de importação de proventos (semanal)
 ├── modules/
 │   ├── auth/                       # Login e geração de JWT
 │   ├── asset-classes/              # Classes de ativos (Ação, FII, ETF…)
@@ -174,6 +175,8 @@ Ou por datas:
 | POST | `/income-events` | Registrar provento |
 | PUT | `/income-events/:id` | Atualizar |
 | DELETE | `/income-events/:id` | Remover |
+| POST | `/income-events/import/:ticker` | Importar proventos de um ativo |
+| POST | `/income-events/import/batch` | Importar proventos de todos os ativos |
 
 ### Itens do Portfólio
 | Método | Rota | Descrição |
@@ -235,7 +238,7 @@ Roda **5x por dia, segunda a sexta**, em horário de pregão B3:
 | 15:00 | 18:00 | `0 18 * * 1-5` |
 | 17:30 | 20:30 | `30 20 * * 1-5` |
 
-- **Ativos BRL** → BRAPI (batch, até 50 tickers por chamada)
+- **Ativos BRL** → BRAPI (batch com fallback individual)
 - **Ativos não-BRL** → Yahoo Finance (individual)
 - Faz `upsert` em `PriceHistory` para a data de hoje
 
@@ -244,6 +247,25 @@ Roda **5x por dia, segunda a sexta**, em horário de pregão B3:
 docker compose exec api node -e "
 const { importCurrentPrices } = require('./dist/jobs/price-import.cron');
 importCurrentPrices().then(r => console.log(JSON.stringify(r, null, 2)));
+"
+```
+
+### Importação de Proventos — `income-import.cron.ts`
+
+Roda **1x por semana**, domingo às 06:00 BRT (09:00 UTC):
+
+| Horário BRT | Horário UTC | Cron |
+|---|---|---|
+| Dom 06:00 | Dom 09:00 | `0 9 * * 0` |
+
+- Importa dividendos, JCP e rendimentos de todos os ativos ativos via Yahoo Finance
+- Usa `skipDuplicates` — seguro para rodar múltiplas vezes sem duplicar registros
+
+**Executar manualmente:**
+```bash
+docker compose exec api node -e "
+const { importAllIncomeEvents } = require('./dist/jobs/income-import.cron');
+importAllIncomeEvents().then(r => console.log(JSON.stringify(r, null, 2)));
 "
 ```
 
@@ -264,7 +286,7 @@ importCurrentPrices().then(r => console.log(JSON.stringify(r, null, 2)));
 | Método | Descrição |
 |---|---|
 | `getHistoricalPrices(params)` | Histórico OHLCV de um ticker |
-| `getCurrentPrices(tickers[])` | Cotação atual em batch (até 50 tickers) |
+| `getCurrentPrices(tickers[])` | Cotação atual em batch (fallback individual) |
 | `getYahooCurrentPrice(ticker)` | Cotação atual via Yahoo Finance |
 | `getDividends(ticker)` | Dividendos históricos via Yahoo Finance |
 
@@ -285,22 +307,34 @@ npx prisma studio
 
 ---
 
-## Próximos Passos
+## Roadmap
 
-### Alta Prioridade
-- [ ] **Importação automática de proventos** — cron semanal para buscar dividendos/JCP declarados dos ativos da carteira
-- [ ] **Frontend — gráfico de evolução** — consumir `GET /portfolio-snapshots` para renderizar curva de patrimônio (590+ snapshots DAILY disponíveis)
-- [ ] **Corrigir warning `CORS_ORIGIN`** — garantir que a variável está definida no `.env` de produção
+### ✅ Concluído
+- [x] CRUD completo de ativos, classes, transações, proventos
+- [x] Importação de histórico de preços via BRAPI
+- [x] Snapshots DAILY / WEEKLY / MONTHLY com geração em range
+- [x] Cron de importação de preços (5x/dia — BRAPI + Yahoo Finance)
+- [x] Cron de importação de proventos (semanal — Yahoo Finance)
+- [x] Endpoints de alocação, performance e dividendos
 
-### Média Prioridade
-- [ ] **IRR/XIRR** — retorno real da carteira considerando timing dos aportes
-- [ ] **Benchmark** — comparar rentabilidade vs. CDI, IBOV e IPCA
+### 🔴 Alta Prioridade
+- [ ] **Frontend — dashboard principal** — gráfico de evolução do patrimônio consumindo os snapshots DAILY, cards de KPIs (patrimônio atual, rentabilidade, proventos recebidos), tabela de posição por ativo
+- [ ] **Renda fixa — Tesouro Direto** — modelagem e importação de títulos públicos (Tesouro Selic, IPCA+, Prefixado): cadastro com taxa de emissão, indexador, vencimento e cálculo de marcação a mercado diária
+- [ ] **Renda fixa — CDB / LCI / LCA / LIG / CRI / CRA / Debêntures** — suporte a títulos com rentabilidade % CDI, IPCA+ e prefixada; cálculo de valor bruto, IR regressivo e IOF, e valor líquido na data
+
+### 🟡 Média Prioridade
+- [ ] **IRR/XIRR** — retorno real da carteira considerando timing e valor dos aportes
+- [ ] **Benchmark** — comparar rentabilidade vs. CDI, IBOV e IPCA (série histórica diária)
+- [ ] **Importação via corretora** — leitura de notas de corretagem (PDF/XLSX) para cadastro automático de transações
+- [ ] **Alertas de preço** — notificação quando ativo atingir preço alvo (e-mail ou webhook)
 - [ ] **Testes automatizados** — cobertura mínima nos services críticos (snapshots, portfolio-items, price-import)
 
-### Baixa Prioridade
+### 🟢 Baixa Prioridade
+- [ ] **Multi-carteira** — suporte a múltiplas carteiras por usuário (ex: carteira pessoal, PGBL, carteira do cônjuge)
+- [ ] **Proventos previstos** — calendário de dividendos futuros com base em histórico e anúncios
 - [ ] **Rate limiting** — proteção por IP nos endpoints públicos
-- [ ] **Logs estruturados** — substituir `console.log` por Winston/Pino
-- [ ] **CI/CD** — pipeline GitHub Actions para lint + build + testes
+- [ ] **Logs estruturados** — substituir `console.log` por Winston/Pino com níveis e saída JSON
+- [ ] **CI/CD** — pipeline GitHub Actions: lint + build + testes a cada PR
 
 ---
 

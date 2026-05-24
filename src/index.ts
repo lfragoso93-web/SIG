@@ -17,6 +17,7 @@ import { authenticate }             from './shared/middleware/authenticate'
 import { errorHandler }             from './shared/middleware/errorHandler'
 import { startSnapshotCrons }       from './jobs/snapshot.cron'
 import { startPriceCron }           from './jobs/price-import.cron'
+import { startIncomeCron }          from './jobs/income-import.cron'
 
 const app  = express()
 const PORT = Number(process.env.PORT ?? 3001)
@@ -48,4 +49,5 @@ app.listen(PORT, HOST, () => {
   console.log(`Servidor rodando em http://${HOST}:${PORT}`)
   startSnapshotCrons()
   startPriceCron()
+  startIncomeCron()
 })
