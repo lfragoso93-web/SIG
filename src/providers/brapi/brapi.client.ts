@@ -32,6 +32,7 @@ interface BrapiQuoteResult {
   symbol:               string
   currency?:            string | null
   historicalDataPrice?: BrapiHistoricalRowRaw[]
+  regularMarketPrice?:  number
 }
 
 interface BrapiQuoteResponse {
@@ -169,6 +170,57 @@ class BrapiClient {
         e?.response?.status,
         e?.response?.data,
       )
+    }
+  }
+
+  /**
+   * Busca a cotação atual de múltiplos tickers B3 em batch.
+   * Retorna um Map de ticker → regularMarketPrice.
+   * Aceita até 50 tickers por chamada (limitação da BRAPI).
+   */
+  async getCurrentPrices(tickers: string[]): Promise<Map<string, number>> {
+    const prices = new Map<string, number>()
+    if (tickers.length === 0) return prices
+
+    const chunks: string[][] = []
+    for (let i = 0; i < tickers.length; i += 50) {
+      chunks.push(tickers.slice(i, i + 50))
+    }
+
+    for (const chunk of chunks) {
+      try {
+        const response = await this.http.get<BrapiQuoteResponse>(
+          `/quote/${chunk.map(t => encodeURIComponent(t)).join(',')}`,
+          { params: { fundamental: 'false' } },
+        )
+        for (const result of response.data?.results ?? []) {
+          const price = result.regularMarketPrice
+          if (typeof price === 'number' && price > 0) {
+            prices.set(result.symbol, price)
+          }
+        }
+      } catch (error: unknown) {
+        const e = error as { message?: string; response?: { status?: number } }
+        console.warn(`[brapi] Erro no batch [${chunk.join(',')}]: ${e?.message}`)
+      }
+    }
+    return prices
+  }
+
+  /**
+   * Busca a cotação atual de um ativo internacional via Yahoo Finance.
+   * Retorna null se o ticker não for encontrado ou ocorrer erro.
+   */
+  async getYahooCurrentPrice(ticker: string): Promise<number | null> {
+    try {
+      const response = await this.yahooHttp.get(
+        `/v8/finance/chart/${encodeURIComponent(ticker)}`,
+        { params: { interval: '1d', range: '1d' } },
+      )
+      const price = response.data?.chart?.result?.[0]?.meta?.regularMarketPrice
+      return typeof price === 'number' && price > 0 ? price : null
+    } catch {
+      return null
     }
   }
 

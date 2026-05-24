@@ -16,7 +16,7 @@ import { dividendsRouter }          from './modules/dividends/dividends.routes'
 import { authenticate }             from './shared/middleware/authenticate'
 import { errorHandler }             from './shared/middleware/errorHandler'
 import { startSnapshotCrons }       from './jobs/snapshot.cron'
-import { startPriceCron } from './jobs/price-import.cron'
+import { startPriceCron }           from './jobs/price-import.cron'
 
 const app  = express()
 const PORT = Number(process.env.PORT ?? 3001)
