@@ -110,14 +110,15 @@ const toNullableNumber = (value: unknown): number | null =>
 class BrapiClient {
   private readonly http:      AxiosInstance
   private readonly yahooHttp: AxiosInstance
+  private readonly token:     string
 
   constructor() {
-    const token = process.env.BRAPI_TOKEN
+    this.token = process.env.BRAPI_TOKEN ?? ''
 
     this.http = axios.create({
       baseURL: process.env.BRAPI_BASE_URL ?? 'https://brapi.dev/api',
       timeout: 30_000,
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
     })
 
     this.yahooHttp = axios.create({
@@ -174,24 +175,31 @@ class BrapiClient {
   }
 
   /**
-   * Busca a cotação atual de múltiplos tickers B3 em batch.
-   * Retorna um Map de ticker → regularMarketPrice.
-   * Aceita até 50 tickers por chamada (limitação da BRAPI).
+   * Busca cotação atual de múltiplos tickers B3.
+   * Tenta batch primeiro (token na query string); se retornar 400,
+   * faz fallback buscando ticker por ticker.
    */
   async getCurrentPrices(tickers: string[]): Promise<Map<string, number>> {
     const prices = new Map<string, number>()
     if (tickers.length === 0) return prices
 
+    // ── tentativa batch (chunks de 50) ──────────────────────────────────────
+    const CHUNK_SIZE = 50
     const chunks: string[][] = []
-    for (let i = 0; i < tickers.length; i += 50) {
-      chunks.push(tickers.slice(i, i + 50))
+    for (let i = 0; i < tickers.length; i += CHUNK_SIZE) {
+      chunks.push(tickers.slice(i, i + CHUNK_SIZE))
     }
+
+    const failedTickers: string[] = []
 
     for (const chunk of chunks) {
       try {
+        const params: Record<string, string> = { fundamental: 'false' }
+        if (this.token) params.token = this.token
+
         const response = await this.http.get<BrapiQuoteResponse>(
           `/quote/${chunk.map(t => encodeURIComponent(t)).join(',')}`,
-          { params: { fundamental: 'false' } },
+          { params },
         )
         for (const result of response.data?.results ?? []) {
           const price = result.regularMarketPrice
@@ -200,10 +208,37 @@ class BrapiClient {
           }
         }
       } catch (error: unknown) {
-        const e = error as { message?: string; response?: { status?: number } }
-        console.warn(`[brapi] Erro no batch [${chunk.join(',')}]: ${e?.message}`)
+        const e = error as { response?: { status?: number } }
+        if (e?.response?.status === 400) {
+          // batch rejeitado → enfileira para fallback individual
+          failedTickers.push(...chunk)
+        } else {
+          const msg = (error as Error).message
+          console.warn(`[brapi] Erro no batch [${chunk.join(',')}]: ${msg}`)
+        }
       }
     }
+
+    // ── fallback: um ticker por vez ──────────────────────────────────────────
+    for (const ticker of failedTickers) {
+      try {
+        const params: Record<string, string> = { fundamental: 'false' }
+        if (this.token) params.token = this.token
+
+        const response = await this.http.get<BrapiQuoteResponse>(
+          `/quote/${encodeURIComponent(ticker)}`,
+          { params },
+        )
+        const result = response.data?.results?.[0]
+        const price  = result?.regularMarketPrice
+        if (typeof price === 'number' && price > 0) {
+          prices.set(ticker, price)
+        }
+      } catch (error: unknown) {
+        console.warn(`[brapi] Erro ao buscar ${ticker}: ${(error as Error).message}`)
+      }
+    }
+
     return prices
   }
 
