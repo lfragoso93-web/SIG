@@ -13,11 +13,13 @@ import { portfolioSnapshotsRouter } from './modules/portfolio-snapshots/portfoli
 import { allocationRouter }         from './modules/allocation/allocation.routes'
 import { performanceRouter }        from './modules/performance/performance.routes'
 import { dividendsRouter }          from './modules/dividends/dividends.routes'
+import { treasuryRouter }           from './modules/treasury/treasury.routes'
 import { authenticate }             from './shared/middleware/authenticate'
 import { errorHandler }             from './shared/middleware/errorHandler'
 import { startSnapshotCrons }       from './jobs/snapshot.cron'
 import { startPriceCron }           from './jobs/price-import.cron'
 import { startIncomeCron }          from './jobs/income-import.cron'
+import { startTreasuryCron }        from './jobs/treasury-import.cron'
 
 const app  = express()
 const PORT = Number(process.env.PORT ?? 3001)
@@ -42,6 +44,7 @@ app.use('/portfolio-snapshots', authenticate, portfolioSnapshotsRouter)
 app.use('/allocation',          authenticate, allocationRouter)
 app.use('/performance',         authenticate, performanceRouter)
 app.use('/dividends',           authenticate, dividendsRouter)
+app.use('/treasury',            authenticate, treasuryRouter)
 
 app.use(errorHandler)
 
@@ -50,4 +53,5 @@ app.listen(PORT, HOST, () => {
   startSnapshotCrons()
   startPriceCron()
   startIncomeCron()
+  startTreasuryCron()
 })
