@@ -22,6 +22,20 @@ class PriceHistoryImportController {
       });
     }
   }
+
+  async importFromRadarOpcoes(req: Request, res: Response) {
+    try {
+      const bondName = decodeURIComponent(String(req.params.bondName));
+
+      const result = await priceHistoryImportService.importFromRadarOpcoes(bondName);
+
+      return res.status(201).json(result);
+    } catch (error: any) {
+      return res.status(400).json({
+        message: error?.message || 'Erro ao importar PU do Tesouro Direto.',
+      });
+    }
+  }
 }
 
 export default new PriceHistoryImportController();
