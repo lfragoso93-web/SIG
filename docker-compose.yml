@@ -2,7 +2,7 @@ name: sig
 
 services:
   db:
-    image: postgres:18
+    image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB:       ${POSTGRES_DB}
@@ -11,7 +11,7 @@ services:
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql
+      - postgres_data:/var/lib/postgresql/data
       - ./docker/initdb:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${APP_DB_USER:-app_user} -d ${POSTGRES_DB:-sig_db}"]
@@ -31,17 +31,17 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL:  postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
-      PORT:          ${APP_PORT}
-      NODE_ENV:      ${NODE_ENV}
-      JWT_SECRET:    ${JWT_SECRET}
-      JWT_EXPIRES:   ${JWT_EXPIRES}
-      APP_USERNAME:  ${APP_USERNAME}
-      APP_PASSWORD:  ${APP_PASSWORD}
-      CORS_ORIGIN:   ${CORS_ORIGIN}
+      DATABASE_URL: postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      PORT:         3000
+      NODE_ENV:     ${NODE_ENV:-production}
+      JWT_SECRET:   ${JWT_SECRET}
+      JWT_EXPIRES:  ${JWT_EXPIRES:-8h}
+      APP_USERNAME: ${APP_USERNAME}
+      APP_PASSWORD: ${APP_PASSWORD}
+      # Permite requisições vindas do container web
+      CORS_ORIGIN:  http://web:3001
     ports:
-      - "${APP_PORT}:3000"
-      - "55550:5555"
+      - "${API_PORT:-3000}:3000"
     networks:
       - sig_network
 
@@ -53,16 +53,18 @@ services:
     depends_on:
       - api
     environment:
-      NEXT_PUBLIC_API_URL: http://api:3000
+      # Usado pelo browser (deve ser acessível do host)
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000}
+      # Usado pelo Next.js server-side (dentro da rede Docker)
+      INTERNAL_API_URL:    http://api:3000
+      PORT:                3001
     ports:
-      - "3001:3001"
+      - "${WEB_PORT:-3001}:3001"
     networks:
       - sig_network
 
 volumes:
   postgres_data:
-    external: true
-    name: e516aba4bda627c66c9cdc25d3326200db60d406b8e93598ca60664e580ac910
 
 networks:
   sig_network:
