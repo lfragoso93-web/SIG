@@ -184,7 +184,8 @@ Authorization: Bearer <token>
 |---|---|---|
 | `GET` | `/price-history` | Listar registros |
 | `GET` | `/price-history/:assetId` | Por ativo |
-| `POST` | `/price-history/import/:ticker` | Importar histórico via BRAPI |
+| `POST` | `/price-history/import/:ticker` | Importar histórico via BRAPI (ações/FIIs/ETFs) |
+| `POST` | `/price-history/import/treasury/:bondName` | Importar PU do dia via radaropcoes (Tesouro Direto) |
 
 **Body da importação (por range):**
 ```json
@@ -464,18 +465,30 @@ O serviço `treasury.service.ts` aplica automaticamente as regras fiscais vigent
 
 O IOF incide apenas sobre o lucro e é cobrado nos primeiros 30 dias, com alíquota regressiva diária (96% no dia 1 → 0% a partir do dia 30).
 
+### Custo Médio Ponderado (WAVG)
+
+O `investedAmount` é calculado percorrendo todas as transações `BUY` e `SELL` em ordem cronológica:
+
+- **BUY**: atualiza o preço médio ponderado e aumenta a quantidade acumulada
+- **SELL**: reduz a quantidade sem alterar o preço médio
+- **investedAmount** = `avgCost × qtdAtual`
+
+Isso garante que resgates parciais anteriores não distorçam o custo da posição remanescente.
+
 ### Fórmula P&L
 
 ```
-Valor Bruto     = quantity × unitaryRedemptionValue
-Custo           = quantity × purchaseUnitValue (média ponderada)
-Lucro Bruto     = Valor Bruto − Custo
-IOF             = Lucro Bruto × iofRate  (apenas se < 30 dias)
-Base IR         = Lucro Bruto × (1 − iofRate)
-IR              = Base IR × irRate
-Lucro Líquido   = Lucro Bruto − IOF − IR
-Valor Líquido   = Valor Bruto − IOF − IR
+Valor de Mercado  = quantity × unitaryRedemptionValue
+Custo (WAVG)      = avgCost × quantity  (desconta cotas já vendidas)
+Lucro Bruto       = Valor de Mercado − Custo
+IOF               = Lucro Bruto × iofRate  (apenas se < 30 dias)
+Base IR           = Lucro Bruto × (1 − iofRate)
+IR                = Base IR × irRate
+Lucro Líquido     = Lucro Bruto − IOF − IR
+Valor Líquido     = Custo + Lucro Líquido
 ```
+
+> ℹ️ IR e IOF incidem apenas sobre rendimento positivo. Posições com `grossPnL < 0` retornam `irAmount = 0` e `iofAmount = 0`.
 
 ---
 
@@ -527,9 +540,14 @@ npx prisma generate
 - [x] Cron de importação de preços B3 + Yahoo Finance (5x/dia, seg–sex)
 - [x] Cron de importação de proventos semanal (Yahoo Finance, skipDuplicates)
 - [x] Endpoints de alocação, performance e dividendos
-- [x] **Módulo Tesouro Direto** — cadastro de títulos, cálculo de P&L com IR regressivo e IOF, cron diário via radaropcoes.com
+- [x] **Módulo Tesouro Direto completo** — cadastro de títulos, cálculo de P&L com custo médio ponderado (WAVG), IR regressivo, IOF, cron diário via radaropcoes.com e suporte a resgates parciais
 
 ### 🔴 Alta Prioridade
+- [ ] **Tesouro Direto — endpoint de resgate (SELL)**
+  - Registrar resgate parcial ou total via `POST /treasury/:assetId/redeem`
+  - Criar transação `SELL`, atualizar `PortfolioItem.quantity` e `realizedPnL`
+  - Calcular IR e IOF sobre o ganho realizado e retornar imposto devido
+  - Zerar ou arquivar posição quando `quantity = 0`
 - [ ] **Renda fixa privada — CDB / LCI / LCA / LIG / CRI / CRA / Debêntures**
   - Suporte a rentabilidade `% CDI`, `IPCA+` e prefixada
   - Cálculo de valor bruto, IR regressivo, IOF e valor líquido na data
