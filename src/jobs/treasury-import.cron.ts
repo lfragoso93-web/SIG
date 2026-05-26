@@ -53,12 +53,22 @@ export async function importTreasuryPrices(): Promise<{
 
       const bond = await radarOpcoesClient.getBond(asset.name)
 
+      // API pode retornar null quando o mercado está fechado ou o título não está disponível
+      if (bond.unitaryRedemptionValue == null) {
+        console.warn(`[treasury-import] ${asset.name}: unitaryRedemptionValue nulo, pulando.`)
+        skipped++
+        continue
+      }
+
+      const redeemValue  = bond.unitaryRedemptionValue
+      const investValue  = bond.unitaryInvestmentValue ?? redeemValue
+
       await prisma.priceHistory.create({
         data: {
           assetId:      asset.id,
           priceDate:    new Date(dateStr),
-          openPrice:    bond.unitaryInvestmentValue,
-          closePrice:   bond.unitaryRedemptionValue,
+          openPrice:    investValue,
+          closePrice:   redeemValue,
           currencyCode: 'BRL',
           source:       'radaropcoes',
         },
@@ -67,13 +77,13 @@ export async function importTreasuryPrices(): Promise<{
       await prisma.portfolioItem.updateMany({
         where: { assetId: asset.id },
         data:  {
-          marketPrice:   bond.unitaryRedemptionValue,
+          marketPrice:   redeemValue,
           lastUpdatedAt: today,
         },
       })
 
       console.log(
-        `[treasury-import] ${asset.name}: resgate R$ ${bond.unitaryRedemptionValue} | compra R$ ${bond.unitaryInvestmentValue}`,
+        `[treasury-import] ${asset.name}: resgate R$ ${redeemValue} | compra R$ ${investValue}`,
       )
       updated++
     } catch (err: unknown) {
