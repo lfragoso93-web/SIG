@@ -1,5 +1,6 @@
 import { Decimal } from '@prisma/client/runtime/library'
 import { prisma } from '../../core/prisma/prisma.service'
+import { getMacroRates } from '../../providers/brapi/brapi-rates.provider'
 import type { CreateFixedIncomeDto, RedeemFixedIncomeDto } from './fixed-income.schema'
 
 // ---------------------------------------------------------------------------
@@ -37,40 +38,42 @@ function calcIofRate(purchaseDate: Date, referenceDate: Date): number {
 // ---------------------------------------------------------------------------
 // Accrual diário — calcula o valor bruto acumulado até referenceDate
 //
-// Fórmula (regime 252 dias úteis para CDI/SELIC, 365 corridos para prefixado/IPCA):
-//   CDI/SELIC : valorBruto = principal × (1 + rate × CDI_diario) ^ diasUteis
-//   Prefixado  : valorBruto = principal × (1 + taxaAnual) ^ (diasCorridos / 365)
-//   IPCA+      : simplificado como prefixado com taxa bruta (IPCA + spread)
+// CDI/SELIC : principal × (1 + cdiAnual × percentualContratado) ^ (dias / 252)
+// Prefixado  : principal × (1 + taxaAnual)                      ^ (dias / 365)
+// IPCA+      : principal × (1 + ipcaAnual + spread)             ^ (dias / 365)
 //
-// Observação: CDI_diario não é consumido de API externa nesta versão.  
-// Usamos a aproximação conservadora: CDI ≈ SELIC meta (hardcoded 10,5% a.a.).  
-// O campo `rate` para CDI representa o percentual do CDI (ex: 1.15 = 115% CDI).  
+// As taxas CDI, SELIC e IPCA são obtidas da brapi em tempo real (cache 1h).
 // ---------------------------------------------------------------------------
-
-const CDI_ANNUAL_APPROX = 0.105  // ~10,5% a.a. — atualizar conforme BACEN
-
-function calcAccrual(
+async function calcAccrual(
   indexer: string,
   rate: number,
   principal: number,
   purchaseDate: Date,
   referenceDate: Date,
-): number {
+): Promise<number> {
   const calendarDays = Math.max(
     0,
     Math.floor((referenceDate.getTime() - purchaseDate.getTime()) / (1000 * 60 * 60 * 24)),
   )
 
   if (indexer === 'CDI' || indexer === 'SELIC') {
-    // rate = percentual do CDI (ex: 1.15 para 115% CDI)
-    // Aproximação: (1 + CDI_anual × percentual) ^ (dias / 252)
-    // Usamos dias corridos / 252 como proxy de dias úteis
-    const effectiveAnnual = CDI_ANNUAL_APPROX * rate
+    const { cdi, selic } = await getMacroRates()
+    const baseRate       = indexer === 'CDI' ? cdi : selic
+    // rate = percentual contratado (ex: 1.15 = 115% CDI)
+    const effectiveAnnual = baseRate * rate
     const factor = Math.pow(1 + effectiveAnnual, calendarDays / 252)
     return principal * factor
   }
 
-  // IPCA, PREFIXADO, IGPM — taxa a.a., capitalização contínua em 365 dias
+  if (indexer === 'IPCA' || indexer === 'IGPM') {
+    const { ipca } = await getMacroRates()
+    // rate = spread anual contratado (ex: 0.06 = IPCA + 6% a.a.)
+    const effectiveAnnual = ipca + rate
+    const factor = Math.pow(1 + effectiveAnnual, calendarDays / 365)
+    return principal * factor
+  }
+
+  // PREFIXADO — rate já é a taxa anual bruta contratada
   const factor = Math.pow(1 + rate, calendarDays / 365)
   return principal * factor
 }
@@ -105,9 +108,9 @@ export async function createFixedIncome(dto: CreateFixedIncomeDto) {
     where: { code: 'FIXED_INCOME' },
   })
 
-  const ticker    = buildTicker(dto.productType, dto.issuer, dto.purchaseDate)
-  const accountId = dto.accountId ?? null
-  const irExempt  = isIrExempt(dto.productType)
+  const ticker       = buildTicker(dto.productType, dto.issuer, dto.purchaseDate)
+  const accountId    = dto.accountId ?? null
+  const irExempt     = isIrExempt(dto.productType)
   const fgcProtected = hasFgc(dto.productType)
 
   const asset = await prisma.asset.upsert({
@@ -146,7 +149,10 @@ export async function createFixedIncome(dto: CreateFixedIncomeDto) {
     },
   })
 
-  const grossValue = calcAccrual(dto.indexer, dto.rate, dto.principal, new Date(dto.purchaseDate), new Date())
+  const grossValue = await calcAccrual(
+    dto.indexer, dto.rate, dto.principal,
+    new Date(dto.purchaseDate), new Date(),
+  )
 
   const existing = await prisma.portfolioItem.findFirst({
     where: { assetId: asset.id, accountId },
@@ -205,7 +211,7 @@ export async function listFixedIncome() {
       const indexer      = item.asset.indexer ?? 'CDI'
       const irExempt     = item.asset.irExempt
 
-      const grossValue  = calcAccrual(indexer, rate, principal, purchaseDate, today)
+      const grossValue  = await calcAccrual(indexer, rate, principal, purchaseDate, today)
       const grossPnL    = grossValue - principal
 
       const irRate  = irExempt ? 0 : calcIrRate(purchaseDate, today)
@@ -259,14 +265,6 @@ export async function getFixedIncome(assetId: string) {
 
 /**
  * Resgate parcial ou total de renda fixa.
- *
- * Fluxo:
- *  1. Valida que o investimento existe e o valor solicitado é possível.
- *  2. Calcula o valor bruto acumulado via accrual.
- *  3. Aplica IR (regressivo, se não isento) e IOF.
- *  4. Cria transação SELL.
- *  5. Atualiza PortfolioItem (reduz quantity/investedAmount proporcionalmente).
- *  6. Arquiva o Asset se saldo zerado.
  */
 export async function redeemFixedIncome(assetId: string, dto: RedeemFixedIncomeDto) {
   const portfolioItem = await prisma.portfolioItem.findFirst({
@@ -279,7 +277,7 @@ export async function redeemFixedIncome(assetId: string, dto: RedeemFixedIncomeD
   }
 
   const redeemDate   = dto.redeemDate ? new Date(dto.redeemDate) : new Date()
-  const principal    = Number(portfolioItem.quantity)   // principal total na posição
+  const principal    = Number(portfolioItem.quantity)
   const indexer      = portfolioItem.asset.indexer ?? 'CDI'
   const irExempt     = portfolioItem.asset.irExempt
 
@@ -290,13 +288,13 @@ export async function redeemFixedIncome(assetId: string, dto: RedeemFixedIncomeD
   })
 
   const purchaseDate = firstBuy?.tradeDate ?? portfolioItem.createdAt
-  const rate         = firstBuy?.unitPrice ? Number(firstBuy.unitPrice) : Number(portfolioItem.averagePrice ?? 0)
+  const rate         = firstBuy?.unitPrice
+    ? Number(firstBuy.unitPrice)
+    : Number(portfolioItem.averagePrice ?? 0)
 
-  // Valor bruto total acumulado até a data de resgate
-  const grossValueTotal = calcAccrual(indexer, rate, principal, purchaseDate, redeemDate)
+  const grossValueTotal = await calcAccrual(indexer, rate, principal, purchaseDate, redeemDate)
 
-  // Proporção do resgate (resgate parcial por valor bruto)
-  const redeemGross     = dto.amount ?? grossValueTotal
+  const redeemGross = dto.amount ?? grossValueTotal
   if (redeemGross > grossValueTotal + 0.01) {
     throw Object.assign(
       new Error(`Valor solicitado (${redeemGross}) excede o saldo bruto disponível (${grossValueTotal.toFixed(2)}).`),
@@ -304,11 +302,10 @@ export async function redeemFixedIncome(assetId: string, dto: RedeemFixedIncomeD
     )
   }
 
-  const proportion      = redeemGross / grossValueTotal   // fração resgatada
-  const principalPart   = principal * proportion          // parcela do principal
-  const grossPnL        = redeemGross - principalPart
+  const proportion    = redeemGross / grossValueTotal
+  const principalPart = principal * proportion
+  const grossPnL      = redeemGross - principalPart
 
-  // IR e IOF
   const irRate  = irExempt ? 0 : calcIrRate(purchaseDate, redeemDate)
   const iofRate = calcIofRate(purchaseDate, redeemDate)
 
@@ -318,9 +315,12 @@ export async function redeemFixedIncome(assetId: string, dto: RedeemFixedIncomeD
   const netPnL      = grossPnL - iofAmount - irAmount
   const netProceeds = redeemGross - iofAmount - irAmount
 
-  // Saldo remanescente
   const newPrincipal   = principal - principalPart
   const positionClosed = newPrincipal < 0.01
+
+  const remainingGross = positionClosed
+    ? 0
+    : await calcAccrual(indexer, rate, newPrincipal, purchaseDate, redeemDate)
 
   const [sellTx] = await prisma.$transaction([
     prisma.transaction.create({
@@ -344,9 +344,7 @@ export async function redeemFixedIncome(assetId: string, dto: RedeemFixedIncomeD
         quantity:       new Decimal(positionClosed ? 0 : newPrincipal),
         investedAmount: new Decimal(positionClosed ? 0 : newPrincipal),
         realizedPnL:    { increment: new Decimal(netPnL) },
-        marketValue:    new Decimal(
-          positionClosed ? 0 : calcAccrual(indexer, rate, newPrincipal, purchaseDate, redeemDate),
-        ),
+        marketValue:    new Decimal(remainingGross),
       },
     }),
 
@@ -357,11 +355,11 @@ export async function redeemFixedIncome(assetId: string, dto: RedeemFixedIncomeD
 
   return {
     assetId,
-    name:              portfolioItem.asset.name,
-    redeemDate:        redeemDate.toISOString().slice(0, 10),
-    principalRedeemed: principalPart,
+    name:               portfolioItem.asset.name,
+    redeemDate:         redeemDate.toISOString().slice(0, 10),
+    principalRedeemed:  principalPart,
     principalRemaining: positionClosed ? 0 : newPrincipal,
-    grossProceeds:     redeemGross,
+    grossProceeds:      redeemGross,
     grossPnL,
     irExempt,
     irRate,
@@ -371,6 +369,6 @@ export async function redeemFixedIncome(assetId: string, dto: RedeemFixedIncomeD
     netPnL,
     netProceeds,
     positionClosed,
-    transactionId:     sellTx.id,
+    transactionId:      sellTx.id,
   }
 }
