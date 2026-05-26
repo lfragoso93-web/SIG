@@ -2,7 +2,7 @@ name: sig
 
 services:
   db:
-    image: postgres:17-alpine
+    image: postgres:18
     restart: unless-stopped
     environment:
       POSTGRES_DB:       ${POSTGRES_DB}
@@ -38,7 +38,6 @@ services:
       JWT_EXPIRES:  ${JWT_EXPIRES:-8h}
       APP_USERNAME: ${APP_USERNAME}
       APP_PASSWORD: ${APP_PASSWORD}
-      # Permite requisições vindas do container web
       CORS_ORIGIN:  http://web:3001
     ports:
       - "${API_PORT:-3000}:3000"
@@ -53,9 +52,7 @@ services:
     depends_on:
       - api
     environment:
-      # Usado pelo browser (deve ser acessível do host)
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000}
-      # Usado pelo Next.js server-side (dentro da rede Docker)
       INTERNAL_API_URL:    http://api:3000
       PORT:                3001
     ports:
