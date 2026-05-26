@@ -263,7 +263,7 @@ export async function updateTreasuryBond(assetId: string, dto: UpdateTreasuryBon
  *  3. Calcula o P&L realizado com IR (FIFO) e IOF.
  *  4. Cria transação SELL.
  *  5. Atualiza PortfolioItem: reduz quantity, recalcula investedAmount e realizedPnL.
- *  6. Arquiva a posição (isActive = false) se quantity = 0.
+ *  6. Arquiva o Asset (isActive = false) se quantity = 0.
  */
 export async function redeemTreasuryBond(assetId: string, dto: RedeemTreasuryBondDto) {
   // ------------------------------------------------------------------
@@ -313,7 +313,7 @@ export async function redeemTreasuryBond(assetId: string, dto: RedeemTreasuryBon
   // ------------------------------------------------------------------
   const { avgCost } = await calcWavg(assetId)
 
-  const redeemDate  = dto.redeemDate ? new Date(dto.redeemDate) : new Date()
+  const redeemDate    = dto.redeemDate ? new Date(dto.redeemDate) : new Date()
   const grossProceeds = dto.quantity * redeemUnitPrice
   const costBasis     = avgCost * dto.quantity
   const grossPnL      = grossProceeds - costBasis
@@ -331,16 +331,16 @@ export async function redeemTreasuryBond(assetId: string, dto: RedeemTreasuryBon
   const irRate  = calcIrRate(purchaseDate, redeemDate)
   const iofRate = calcIofRate(purchaseDate, redeemDate)
 
-  const gain      = grossPnL > 0 ? grossPnL : 0
-  const iofAmount = gain * iofRate
-  const irAmount  = (gain - iofAmount) * irRate
-  const netPnL    = grossPnL - iofAmount - irAmount
+  const gain        = grossPnL > 0 ? grossPnL : 0
+  const iofAmount   = gain * iofRate
+  const irAmount    = (gain - iofAmount) * irRate
+  const netPnL      = grossPnL - iofAmount - irAmount
   const netProceeds = grossProceeds - iofAmount - irAmount
 
   // ------------------------------------------------------------------
   // 5. Persistência em transação atômica
   // ------------------------------------------------------------------
-  const newQty        = currentQty - dto.quantity
+  const newQty         = currentQty - dto.quantity
   const positionClosed = newQty === 0
 
   const [sellTx] = await prisma.$transaction([
@@ -348,19 +348,19 @@ export async function redeemTreasuryBond(assetId: string, dto: RedeemTreasuryBon
     prisma.transaction.create({
       data: {
         assetId,
-        accountId:   portfolioItem.accountId,
-        type:        'SELL',
-        tradeDate:   redeemDate,
-        quantity:    new Decimal(dto.quantity),
-        unitPrice:   new Decimal(redeemUnitPrice),
-        grossAmount: new Decimal(grossProceeds),
-        netAmount:   new Decimal(netProceeds),
+        accountId:    portfolioItem.accountId,
+        type:         'SELL',
+        tradeDate:    redeemDate,
+        quantity:     new Decimal(dto.quantity),
+        unitPrice:    new Decimal(redeemUnitPrice),
+        grossAmount:  new Decimal(grossProceeds),
+        netAmount:    new Decimal(netProceeds),
         currencyCode: 'BRL',
-        description: `Resgate Tesouro Direto — ${portfolioItem.asset.name}`,
+        description:  `Resgate Tesouro Direto — ${portfolioItem.asset.name}`,
       },
     }),
 
-    // Atualiza o PortfolioItem
+    // Atualiza o PortfolioItem — isActive não existe neste model, arquivamento é pelo Asset
     prisma.portfolioItem.update({
       where: { id: portfolioItem.id },
       data: {
@@ -368,11 +368,10 @@ export async function redeemTreasuryBond(assetId: string, dto: RedeemTreasuryBon
         investedAmount: new Decimal(avgCost * newQty),
         realizedPnL:    { increment: new Decimal(netPnL) },
         marketValue:    new Decimal(newQty * redeemUnitPrice),
-        isActive:       positionClosed ? false : true,
       },
     }),
 
-    // Arquiva o Asset se a posição foi zerada
+    // Arquiva o Asset quando a posição é zerada
     ...(positionClosed
       ? [prisma.asset.update({
           where: { id: assetId },
