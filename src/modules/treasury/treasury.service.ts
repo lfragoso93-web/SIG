@@ -1,5 +1,5 @@
 import { Decimal } from '@prisma/client/runtime/library'
-import { prisma }  from '../../core/prisma'
+import { prisma }  from '../../core/prisma/prisma.service'
 import { radarOpcoesClient } from '../../providers/radaropcoes/radaropcoes.client'
 import type { CreateTreasuryBondDto, UpdateTreasuryBondDto } from './treasury.schema'
 
@@ -32,25 +32,28 @@ function calcIofRate(purchaseDate: Date, referenceDate: Date = new Date()): numb
   const days = Math.floor(
     (referenceDate.getTime() - purchaseDate.getTime()) / (1000 * 60 * 60 * 24),
   )
-  if (days <= 0)  return 1          // 100% IOF no mesmo dia
-  if (days >= 30) return 0          // zero IOF após 30 dias
-  return IOF_TABLE[days - 1] / 100  // índice 0 = dia 1
+  if (days <= 0)  return 1
+  if (days >= 30) return 0
+  return IOF_TABLE[days - 1] / 100
 }
+
+// ---------------------------------------------------------------------------
+// Tipos internos
+// ---------------------------------------------------------------------------
+
+type PortfolioItemWithAsset = Awaited<
+  ReturnType<typeof prisma.portfolioItem.findMany>
+>[number]
 
 // ---------------------------------------------------------------------------
 // CRUD
 // ---------------------------------------------------------------------------
 
-/**
- * Cria (ou recupera) o Asset do tipo BOND para o título e registra
- * a posição como Transaction BUY + PortfolioItem.
- */
 export async function createTreasuryBond(dto: CreateTreasuryBondDto) {
   const treasuryClass = await prisma.assetClass.findFirstOrThrow({
     where: { code: 'TREASURY' },
   })
 
-  // Upsert do Asset do título (ticker = slug do bondName)
   const ticker = dto.bondName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -73,7 +76,6 @@ export async function createTreasuryBond(dto: CreateTreasuryBondDto) {
 
   const grossAmount = new Decimal(dto.quantity).mul(dto.purchaseUnitValue)
 
-  // Registra a compra como Transaction
   const transaction = await prisma.transaction.create({
     data: {
       assetId:     asset.id,
@@ -89,7 +91,6 @@ export async function createTreasuryBond(dto: CreateTreasuryBondDto) {
     },
   })
 
-  // Upsert PortfolioItem
   const item = await prisma.portfolioItem.upsert({
     where: { assetId_accountId: { assetId: asset.id, accountId: dto.accountId ?? null } },
     update: {
@@ -97,23 +98,20 @@ export async function createTreasuryBond(dto: CreateTreasuryBondDto) {
       investedAmount: { increment: grossAmount },
     },
     create: {
-      assetId:       asset.id,
-      accountId:     dto.accountId ?? null,
-      quantity:      new Decimal(dto.quantity),
-      averagePrice:  new Decimal(dto.purchaseUnitValue),
+      assetId:        asset.id,
+      accountId:      dto.accountId ?? null,
+      quantity:       new Decimal(dto.quantity),
+      averagePrice:   new Decimal(dto.purchaseUnitValue),
       investedAmount: grossAmount,
-      marketValue:   grossAmount,
-      unrealizedPnL: new Decimal(0),
-      realizedPnL:   new Decimal(0),
+      marketValue:    grossAmount,
+      unrealizedPnL:  new Decimal(0),
+      realizedPnL:    new Decimal(0),
     },
   })
 
   return { asset, transaction, portfolioItem: item }
 }
 
-/**
- * Lista todas as posições de Tesouro Direto com P&L calculado.
- */
 export async function listTreasuryBonds() {
   const treasuryClass = await prisma.assetClass.findFirstOrThrow({
     where: { code: 'TREASURY' },
@@ -125,43 +123,39 @@ export async function listTreasuryBonds() {
     orderBy: { asset: { maturityDate: 'asc' } },
   })
 
-  // Para cada item, pega o último preço em PriceHistory
   const result = await Promise.all(
-    items.map(async item => {
+    items.map(async (item: PortfolioItemWithAsset) => {
       const lastPrice = await prisma.priceHistory.findFirst({
         where:   { assetId: item.assetId },
         orderBy: { priceDate: 'desc' },
       })
 
-      const qty             = Number(item.quantity)
-      const investedAmount  = Number(item.investedAmount)
-      const redeemPrice     = lastPrice ? Number(lastPrice.closePrice) : null
-      const marketValue     = redeemPrice !== null ? qty * redeemPrice : null
-      const grossPnL        = marketValue !== null ? marketValue - investedAmount : null
+      const qty            = Number(item.quantity)
+      const investedAmount = Number(item.investedAmount)
+      const redeemPrice    = lastPrice ? Number(lastPrice.closePrice) : null
+      const marketValue    = redeemPrice !== null ? qty * redeemPrice : null
+      const grossPnL       = marketValue !== null ? marketValue - investedAmount : null
 
-      // IR e IOF
-      const purchaseDate    = item.createdAt  // aproximação; idealmente viria da Transaction
-      const irRate          = calcIrRate(purchaseDate)
-      const iofRate         = calcIofRate(purchaseDate)
-      const irAmount        = grossPnL !== null && grossPnL > 0
+      const purchaseDate = item.createdAt
+      const irRate       = calcIrRate(purchaseDate)
+      const iofRate      = calcIofRate(purchaseDate)
+      const irAmount     = grossPnL !== null && grossPnL > 0
         ? grossPnL * (1 - iofRate) * irRate
         : 0
-      const iofAmount       = grossPnL !== null && grossPnL > 0
+      const iofAmount    = grossPnL !== null && grossPnL > 0
         ? grossPnL * iofRate
         : 0
-      const netPnL          = grossPnL !== null
-        ? grossPnL - irAmount - iofAmount
-        : null
-      const netValue        = marketValue !== null ? marketValue - irAmount - iofAmount : null
+      const netPnL       = grossPnL !== null ? grossPnL - irAmount - iofAmount : null
+      const netValue     = marketValue !== null ? marketValue - irAmount - iofAmount : null
 
       return {
-        assetId:       item.assetId,
-        bondName:      item.asset.name,
-        ticker:        item.asset.ticker,
-        indexer:       item.asset.indexer ?? null,
-        maturityDate:  item.asset.maturityDate ?? null,
-        accountId:     item.accountId ?? null,
-        quantity:      qty,
+        assetId:         item.assetId,
+        bondName:        item.asset.name,
+        ticker:          item.asset.ticker,
+        indexer:         item.asset.indexer ?? null,
+        maturityDate:    item.asset.maturityDate ?? null,
+        accountId:       item.accountId ?? null,
+        quantity:        qty,
         investedAmount,
         redeemUnitPrice: redeemPrice,
         marketValue,
@@ -172,7 +166,7 @@ export async function listTreasuryBonds() {
         iofAmount,
         netPnL,
         netValue,
-        lastPriceDate: lastPrice?.priceDate ?? null,
+        lastPriceDate:   lastPrice?.priceDate ?? null,
       }
     }),
   )
@@ -180,33 +174,24 @@ export async function listTreasuryBonds() {
   return result
 }
 
-/**
- * Retorna um título pelo assetId com P&L detalhado.
- */
 export async function getTreasuryBond(assetId: string) {
   const items = await listTreasuryBonds()
-  const item  = items.find(i => i.assetId === assetId)
+  const item  = items.find((i: { assetId: string }) => i.assetId === assetId)
   if (!item) throw Object.assign(new Error('Título não encontrado.'), { status: 404 })
   return item
 }
 
-/**
- * Atualiza metadados do Asset (indexer, maturityDate, isActive).
- */
 export async function updateTreasuryBond(assetId: string, dto: UpdateTreasuryBondDto) {
   const data: Record<string, unknown> = {}
 
-  if (dto.indexer)      data.indexer      = dto.indexer
-  if (dto.maturityDate) data.maturityDate = new Date(dto.maturityDate)
-  if (dto.isActive !== undefined) data.isActive = dto.isActive
-  if (dto.bondName)     data.name         = dto.bondName
+  if (dto.indexer)               data.indexer      = dto.indexer
+  if (dto.maturityDate)          data.maturityDate  = new Date(dto.maturityDate)
+  if (dto.isActive !== undefined) data.isActive     = dto.isActive
+  if (dto.bondName)              data.name          = dto.bondName
 
   return prisma.asset.update({ where: { id: assetId }, data })
 }
 
-/**
- * Lista os títulos disponíveis na API radaropcoes (para onboarding).
- */
 export async function listAvailableBonds() {
   return radarOpcoesClient.listBonds()
 }
