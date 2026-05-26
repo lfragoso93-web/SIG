@@ -79,7 +79,7 @@ model Account {
 
 model Asset {
   id             String                   @id @default(cuid())
-  ticker         String                   @unique @db.VarChar(30)
+  ticker         String                   @unique @db.VarChar(60)
   name           String                   @db.VarChar(150)
   normalizedName String?                  @db.VarChar(150)
   assetType      AssetType
