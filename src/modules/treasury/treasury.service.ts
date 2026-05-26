@@ -204,6 +204,10 @@ export async function updateTreasuryBond(assetId: string, dto: UpdateTreasuryBon
   return prisma.asset.update({ where: { id: assetId }, data })
 }
 
+/**
+ * Lista os títulos disponíveis no Tesouro Direto via RadarOpcoes.
+ * Retorna nome, PU de resgate e PU de compra.
+ */
 export async function listAvailableBonds() {
   return radarOpcoesClient.listBonds()
 }
