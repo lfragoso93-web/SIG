@@ -60,8 +60,7 @@ export async function createTreasuryBond(dto: CreateTreasuryBondDto) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '')
 
-  // accountId é null quando não informado (FK aceita null; string vazia quebraria a constraint)
-  const accountId = dto.accountId ?? null
+  const accountId: string | null = dto.accountId ?? null
 
   const asset = await prisma.asset.upsert({
     where:  { ticker },
@@ -95,23 +94,32 @@ export async function createTreasuryBond(dto: CreateTreasuryBondDto) {
     },
   })
 
-  const item = await prisma.portfolioItem.upsert({
-    where:  { assetId_accountId: { assetId: asset.id, accountId } },
-    update: {
-      quantity:       { increment: new Decimal(dto.quantity) },
-      investedAmount: { increment: grossAmount },
-    },
-    create: {
-      assetId:        asset.id,
-      accountId,
-      quantity:       new Decimal(dto.quantity),
-      averagePrice:   new Decimal(dto.purchaseUnitValue),
-      investedAmount: grossAmount,
-      marketValue:    grossAmount,
-      unrealizedPnL:  new Decimal(0),
-      realizedPnL:    new Decimal(0),
-    },
+  // Prisma não aceita null no where de unique composto gerado pelo Client;
+  // substituímos o upsert por findFirst + create/update para contornar a limitação.
+  const existing = await prisma.portfolioItem.findFirst({
+    where: { assetId: asset.id, accountId },
   })
+
+  const item = existing
+    ? await prisma.portfolioItem.update({
+        where: { id: existing.id },
+        data: {
+          quantity:       { increment: new Decimal(dto.quantity) },
+          investedAmount: { increment: grossAmount },
+        },
+      })
+    : await prisma.portfolioItem.create({
+        data: {
+          assetId:        asset.id,
+          accountId,
+          quantity:       new Decimal(dto.quantity),
+          averagePrice:   new Decimal(dto.purchaseUnitValue),
+          investedAmount: grossAmount,
+          marketValue:    grossAmount,
+          unrealizedPnL:  new Decimal(0),
+          realizedPnL:    new Decimal(0),
+        },
+      })
 
   return { asset, transaction, portfolioItem: item }
 }
