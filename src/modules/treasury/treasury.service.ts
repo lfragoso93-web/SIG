@@ -160,18 +160,39 @@ export async function listTreasuryBonds() {
       })
 
       // -----------------------------------------------------------------
-      // 2. Recalcula o valor investido somando todas as transações BUY
-      //    (quantity × unitPrice) — fonte de verdade confiável.
+      // 2. Calcula o custo médio ponderado (WAVG) das cotas em carteira,
+      //    descontando o custo das cotas já vendidas.
+      //
+      //    Algoritmo WAVG:
+      //      - Percorre todas as transações BUY e SELL em ordem cronológica.
+      //      - A cada BUY: atualiza preço médio e quantidade acumulada.
+      //      - A cada SELL: reduz a quantidade sem alterar o preço médio.
+      //      - investedAmount = quantidade atual × preço médio final.
       // -----------------------------------------------------------------
-      const buyTxs = await prisma.transaction.findMany({
-        where:  { assetId: item.assetId, type: 'BUY' },
-        select: { quantity: true, unitPrice: true },
+      const allTxs = await prisma.transaction.findMany({
+        where:   { assetId: item.assetId, type: { in: ['BUY', 'SELL'] } },
+        orderBy: { tradeDate: 'asc' },
+        select:  { type: true, quantity: true, unitPrice: true },
       })
 
-      const investedAmount = buyTxs.reduce(
-        (sum, tx) => sum + Number(tx.quantity) * Number(tx.unitPrice),
-        0,
-      )
+      let avgCost  = 0
+      let totalQty = 0
+
+      for (const tx of allTxs) {
+        const qty   = Math.abs(Number(tx.quantity))
+        const price = Number(tx.unitPrice)
+
+        if (tx.type === 'BUY') {
+          // Novo preço médio ponderado
+          avgCost  = (avgCost * totalQty + price * qty) / (totalQty + qty)
+          totalQty = totalQty + qty
+        } else {
+          // SELL: apenas reduz a quantidade, preço médio permanece
+          totalQty = Math.max(0, totalQty - qty)
+        }
+      }
+
+      const investedAmount = avgCost * totalQty
 
       // -----------------------------------------------------------------
       // 3. PU de resgate mais recente
