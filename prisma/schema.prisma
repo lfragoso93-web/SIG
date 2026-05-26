@@ -90,6 +90,8 @@ model Asset {
   sector         String?                  @db.VarChar(100)
   segment        String?                  @db.VarChar(100)
   issuer         String?                  @db.VarChar(150)
+  maturityDate   DateTime?                @db.Date
+  indexer        String?                  @db.VarChar(30)
   isActive       Boolean                  @default(true)
   notes          String?
   createdAt      DateTime                 @default(now())
