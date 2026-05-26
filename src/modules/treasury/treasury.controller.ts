@@ -33,7 +33,7 @@ export async function handleGetTreasuryBond(
   req: Request, res: Response, next: NextFunction,
 ) {
   try {
-    const bond = await getTreasuryBond(req.params.assetId)
+    const bond = await getTreasuryBond(String(req.params.assetId))
     res.json(bond)
   } catch (err) { next(err) }
 }
@@ -53,7 +53,7 @@ export async function handleUpdateTreasuryBond(
 ) {
   try {
     const dto    = UpdateTreasuryBondDto.parse(req.body)
-    const result = await updateTreasuryBond(req.params.assetId, dto)
+    const result = await updateTreasuryBond(String(req.params.assetId), dto)
     res.json(result)
   } catch (err) { next(err) }
 }
