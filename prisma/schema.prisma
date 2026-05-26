@@ -92,6 +92,12 @@ model Asset {
   issuer         String?                  @db.VarChar(150)
   maturityDate   DateTime?                @db.Date
   indexer        String?                  @db.VarChar(30)
+  /// Cobertura FGC (CDB, LCI, LCA — até R$250k/inst.)
+  fgcProtected   Boolean                  @default(false)
+  /// Isento de IR (LCI, LCA, CRI, CRA)
+  irExempt       Boolean                  @default(false)
+  /// Liquidez em dias corridos: 0 = diária | null = só no vencimento | N = carência
+  liquidityDays  Int?
   isActive       Boolean                  @default(true)
   notes          String?
   createdAt      DateTime                 @default(now())
