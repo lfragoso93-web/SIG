@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import { Router } from 'express'
 import {
   createFixedIncomeHandler,
   listFixedIncomeHandler,
@@ -6,16 +6,16 @@ import {
   redeemFixedIncomeHandler,
 } from './fixed-income.controller'
 
-export async function fixedIncomeRoutes(app: FastifyInstance) {
-  // POST   /fixed-income          → registrar nova aplicação
-  app.post('/', createFixedIncomeHandler)
+export const fixedIncomeRouter = Router()
 
-  // GET    /fixed-income          → listar todas as posições ativas
-  app.get('/', listFixedIncomeHandler)
+// POST   /fixed-income              → registrar nova aplicação
+fixedIncomeRouter.post('/',                    createFixedIncomeHandler)
 
-  // GET    /fixed-income/:assetId → detalhar uma posição
-  app.get('/:assetId', getFixedIncomeHandler)
+// GET    /fixed-income              → listar todas as posições ativas
+fixedIncomeRouter.get('/',                     listFixedIncomeHandler)
 
-  // POST   /fixed-income/:assetId/redeem → resgatar
-  app.post('/:assetId/redeem', redeemFixedIncomeHandler)
-}
+// GET    /fixed-income/:assetId     → detalhar uma posição
+fixedIncomeRouter.get('/:assetId',             getFixedIncomeHandler)
+
+// POST   /fixed-income/:assetId/redeem → resgatar
+fixedIncomeRouter.post('/:assetId/redeem',     redeemFixedIncomeHandler)

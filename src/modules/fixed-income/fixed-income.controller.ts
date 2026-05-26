@@ -1,37 +1,49 @@
-import type { FastifyRequest, FastifyReply } from 'fastify'
+import type { Request, Response, NextFunction } from 'express'
 import { createFixedIncomeSchema, redeemFixedIncomeSchema } from './fixed-income.schema'
 import * as service from './fixed-income.service'
 
 export async function createFixedIncomeHandler(
-  req: FastifyRequest,
-  reply: FastifyReply,
+  req: Request,
+  res: Response,
+  next: NextFunction,
 ) {
-  const dto = createFixedIncomeSchema.parse(req.body)
-  const result = await service.createFixedIncome(dto)
-  return reply.status(201).send(result)
+  try {
+    const dto    = createFixedIncomeSchema.parse(req.body)
+    const result = await service.createFixedIncome(dto)
+    res.status(201).json(result)
+  } catch (err) { next(err) }
 }
 
 export async function listFixedIncomeHandler(
-  _req: FastifyRequest,
-  reply: FastifyReply,
+  _req: Request,
+  res: Response,
+  next: NextFunction,
 ) {
-  const result = await service.listFixedIncome()
-  return reply.send(result)
+  try {
+    const result = await service.listFixedIncome()
+    res.json(result)
+  } catch (err) { next(err) }
 }
 
 export async function getFixedIncomeHandler(
-  req: FastifyRequest<{ Params: { assetId: string } }>,
-  reply: FastifyReply,
+  req: Request<{ assetId: string }>,
+  res: Response,
+  next: NextFunction,
 ) {
-  const result = await service.getFixedIncome(req.params.assetId)
-  return reply.send(result)
+  try {
+    const result = await service.getFixedIncome(req.params.assetId)
+    res.json(result)
+  } catch (err) { next(err) }
 }
 
 export async function redeemFixedIncomeHandler(
-  req: FastifyRequest<{ Params: { assetId: string } }>,
-  reply: FastifyReply,
+  req: Request<{ assetId: string }>,
+  res: Response,
+  next: NextFunction,
 ) {
-  const dto    = redeemFixedIncomeSchema.parse(req.body)
-  const result = await service.redeemFixedIncome(req.params.assetId, dto)
-  return reply.send(result)
+  try {
+    const dto    = redeemFixedIncomeSchema.parse(req.body)
+    const result = await service.redeemFixedIncome(req.params.assetId, dto)
+    res.json(result)
+  } catch (err) { next(err) }
 }
