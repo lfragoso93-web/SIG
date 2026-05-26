@@ -16,6 +16,7 @@ API REST para controle e acompanhamento de carteiras de investimentos. Permite c
 | Cotações B3 | BRAPI (ações, FIIs, ETFs, BDRs) |
 | Cotações internacionais | Yahoo Finance |
 | Cotações Tesouro Direto | radaropcoes.com |
+| Taxas macro (CDI/SELIC/IPCA) | BRAPI |
 | Containerização | Docker Compose |
 | Autenticação | JWT (Bearer token) |
 | Validação | Zod |
@@ -33,7 +34,8 @@ src/
 │   ├── snapshot.cron.ts                 # Cron de snapshots DAILY/WEEKLY/MONTHLY
 │   ├── price-import.cron.ts             # Cron de importação de preços (5x/dia, B3 + Yahoo)
 │   ├── income-import.cron.ts            # Cron de importação de proventos (semanal)
-│   └── treasury-import.cron.ts          # Cron de preços do Tesouro Direto (seg-sex 19h BRT)
+│   ├── treasury-import.cron.ts          # Cron de preços do Tesouro Direto (seg-sex 19h BRT)
+│   └── fixed-income-accrual.cron.ts     # Cron de accrual de renda fixa privada (seg-sex 18h45 BRT)
 ├── modules/
 │   ├── auth/                            # Login e geração de JWT
 │   ├── asset-classes/                   # Classes de ativos (Ação, FII, ETF, TREASURY…)
@@ -46,14 +48,20 @@ src/
 │   ├── allocation/                      # Distribuição da carteira por classe
 │   ├── performance/                     # Rentabilidade da carteira
 │   ├── dividends/                       # Resumo de proventos recebidos
-│   └── treasury/                        # Tesouro Direto — CRUD, P&L, IR e IOF
-│       ├── treasury.schema.ts           # DTOs (Zod)
-│       ├── treasury.service.ts          # Regras de negócio + cálculos financeiros
-│       ├── treasury.controller.ts       # Handlers HTTP
-│       └── treasury.routes.ts           # Definição de rotas
+│   ├── treasury/                        # Tesouro Direto — CRUD, P&L, IR, IOF e resgate
+│   │   ├── treasury.schema.ts           # DTOs (Zod)
+│   │   ├── treasury.service.ts          # Regras de negócio + cálculos financeiros
+│   │   ├── treasury.controller.ts       # Handlers HTTP
+│   │   └── treasury.routes.ts           # Definição de rotas
+│   └── fixed-income/                    # Renda Fixa Privada — CRUD, accrual, IR/IOF/isenção
+│       ├── fixed-income.schema.ts       # DTOs (Zod)
+│       ├── fixed-income.service.ts      # Accrual, IR regressivo, IOF, isenção LCI/LCA/CRI/CRA
+│       ├── fixed-income.controller.ts   # Handlers HTTP
+│       └── fixed-income.routes.ts       # Definição de rotas
 ├── providers/
 │   ├── brapi/
 │   │   ├── brapi.client.ts              # BRAPI + Yahoo Finance (cotação, histórico, dividendos)
+│   │   ├── brapi-rates.provider.ts      # Taxas macro diárias: CDI, SELIC, IPCA (cache 1h)
 │   │   └── brapi.types.ts               # Tipos auxiliares
 │   └── radaropcoes/
 │       └── radaropcoes.client.ts        # Cotações do Tesouro Direto (sem autenticação)
@@ -81,7 +89,7 @@ DATABASE_URL="postgresql://user:password@localhost:5432/sig"
 JWT_SECRET="sua-chave-secreta"
 JWT_EXPIRES_IN="7d"
 
-# BRAPI (cotações B3)
+# BRAPI (cotações B3 + taxas macro CDI/SELIC/IPCA)
 BRAPI_TOKEN="seu-token-brapi"
 BRAPI_BASE_URL="https://brapi.dev/api"   # opcional — padrão já configurado
 
@@ -237,7 +245,7 @@ Authorization: Bearer <token>
 ```json
 {
   "startDate": "2026-01-01",
-  "endDate": "2026-05-23",
+  "endDate": "2026-05-26",
   "period": "DAILY"
 }
 ```
@@ -267,6 +275,7 @@ Authorization: Bearer <token>
 | `GET` | `/treasury` | Lista posições da carteira com P&L, IR e IOF calculados |
 | `GET` | `/treasury/:assetId` | Detalhe de uma posição específica |
 | `POST` | `/treasury` | Registra compra de um título |
+| `POST` | `/treasury/:assetId/redeem` | Registra resgate parcial ou total |
 | `PATCH` | `/treasury/:assetId` | Atualiza metadados (indexer, vencimento, isActive) |
 
 **Body do `POST /treasury`:**
@@ -287,6 +296,47 @@ Authorization: Bearer <token>
 `bondName`: use exatamente o nome retornado por `GET /treasury/available`  
 `quantity`: frações permitidas (mínimo 0,01 unidade)
 
+**Body do `POST /treasury/:assetId/redeem`:**
+```json
+{
+  "quantity": 0.02,
+  "redeemDate": "2026-05-26",
+  "redeemUnitPrice": 19010.70
+}
+```
+
+| Campo | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| `quantity` | number | ✅ | Cotas a resgatar (> 0 e ≤ posição atual) |
+| `redeemDate` | string (ISO) | ❌ | Data do resgate (default: hoje) |
+| `redeemUnitPrice` | number | ❌ | PU de resgate (default: último `closePrice` do `PriceHistory`) |
+
+**Resposta do `POST /treasury/:assetId/redeem`:**
+```json
+{
+  "assetId": "...",
+  "bondName": "Tesouro Selic 2029",
+  "quantityRedeemed": 0.02,
+  "quantityRemaining": 0.11,
+  "redeemUnitPrice": 19010.70,
+  "grossProceeds": 380.21,
+  "costBasis": 370.07,
+  "grossPnL": 10.14,
+  "irRate": 0.225,
+  "iofRate": 0,
+  "irAmount": 2.28,
+  "iofAmount": 0,
+  "netPnL": 7.86,
+  "netProceeds": 387.93,
+  "positionClosed": false,
+  "transactionId": "cuid-gerado"
+}
+```
+
+> ℹ️ `costBasis` = `avgCost × quantityRedeemed` (custo WAVG proporcional à quantidade resgatada).  
+> ℹ️ IR/IOF são calculados pelo prazo da transação `BUY` mais antiga (FIFO fiscal).  
+> ℹ️ Quando `quantityRemaining = 0`, a posição é arquivada automaticamente (`isActive = false`).
+
 **Resposta do `GET /treasury` (por posição):**
 ```json
 {
@@ -305,9 +355,74 @@ Authorization: Bearer <token>
   "iofAmount": 0,
   "netPnL": 76.75,
   "netValue": 1963.80,
-  "lastPriceDate": "2026-05-23"
+  "lastPriceDate": "2026-05-26"
 }
 ```
+
+### Renda Fixa Privada
+| Método | Rota | Descrição |
+|---|---|---|
+| `GET` | `/fixed-income` | Lista posições com valor bruto, IR, IOF e valor líquido |
+| `GET` | `/fixed-income/:assetId` | Detalhe de uma posição específica |
+| `POST` | `/fixed-income` | Registra aplicação em CDB / LCI / LCA / CRI / CRA / Debênture |
+| `POST` | `/fixed-income/:assetId/redeem` | Registra resgate parcial ou total |
+| `PATCH` | `/fixed-income/:assetId` | Atualiza metadados (indexer, taxa, vencimento) |
+
+**Body do `POST /fixed-income`:**
+```json
+{
+  "ticker": "CDB-BANCO-XP-2028",
+  "issuer": "Banco XP S.A.",
+  "assetSubtype": "CDB",
+  "accountId": "cuid-da-conta",
+  "indexer": "CDI",
+  "purchaseRate": 0.13,
+  "purchaseDate": "2025-06-01",
+  "maturityDate": "2028-06-01",
+  "principal": 10000.00
+}
+```
+
+| Campo | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| `ticker` | string | ✅ | Identificador único do papel |
+| `issuer` | string | ✅ | Emissor (banco/empresa) |
+| `assetSubtype` | string | ✅ | `CDB` \| `LCI` \| `LCA` \| `LIG` \| `CRI` \| `CRA` \| `DEBENTURE` \| `OTHER` |
+| `accountId` | string | ✅ | Conta onde a aplicação está custodiada |
+| `indexer` | string | ✅ | `CDI` \| `SELIC` \| `IPCA` \| `IGPM` \| `PREFIXADO` |
+| `purchaseRate` | number | ✅ | Taxa contratada (ex: `1.13` = 113% CDI; `0.06` = IPCA+6% a.a.) |
+| `purchaseDate` | string (ISO) | ✅ | Data da aplicação |
+| `maturityDate` | string (ISO) | ✅ | Data de vencimento |
+| `principal` | number | ✅ | Valor aplicado em R$ |
+
+**Resposta do `GET /fixed-income` (por posição):**
+```json
+{
+  "assetId": "...",
+  "ticker": "CDB-BANCO-XP-2028",
+  "issuer": "Banco XP S.A.",
+  "assetSubtype": "CDB",
+  "indexer": "CDI",
+  "purchaseRate": 1.13,
+  "purchaseDate": "2025-06-01",
+  "maturityDate": "2028-06-01",
+  "principal": 10000.00,
+  "grossValue": 11380.45,
+  "grossPnL": 1380.45,
+  "irRate": 0.175,
+  "iofRate": 0,
+  "irAmount": 241.58,
+  "iofAmount": 0,
+  "netPnL": 1138.87,
+  "netValue": 11138.87,
+  "daysElapsed": 360,
+  "isExempt": false,
+  "lastUpdatedAt": "2026-05-26"
+}
+```
+
+> ℹ️ `isExempt = true` para LCI, LCA, LIG, CRI, CRA e Debêntures incentivadas (PF) — IR = 0.  
+> ℹ️ `grossValue` é calculado por accrual (juros compostos) usando taxas reais da BRAPI (CDI/SELIC/IPCA).
 
 ### Health
 | Método | Rota | Descrição |
@@ -317,6 +432,19 @@ Authorization: Bearer <token>
 ---
 
 ## Jobs Automáticos (Crons)
+
+### Ordem de execução diária (seg–sex)
+
+| Horário BRT | Job | Descrição |
+|---|---|---|
+| 10:00–17:30 | `price-import` | Cotações B3 + Yahoo (5 execuções) |
+| 18:00 (sex) | `snapshot` | Snapshot semanal |
+| 18:30 | `snapshot` | Snapshot diário |
+| **18:45** | **`fixed-income-accrual`** | **Accrual de renda fixa privada** |
+| 19:00 | `treasury-import` | PU do Tesouro Direto |
+| Dom 06:00 | `income-import` | Proventos Yahoo Finance |
+
+---
 
 ### Importação de Preços B3 — `price-import.cron.ts`
 
@@ -369,8 +497,8 @@ importAllIncomeEvents().then(r => console.log(JSON.stringify(r, null, 2)));
 
 | Frequência | Horário BRT | Expressão cron | Período gerado |
 |---|---|---|---|
-| Diário | 23:00 (seg–sex) | `0 23 * * 1-5` | `DAILY` |
-| Semanal | Sex 23:30 | `30 23 * * 5` | `WEEKLY` |
+| Diário | 18:30 (seg–sex) | `30 21 * * 1-5` | `DAILY` |
+| Semanal | Sex 18:00 | `0 21 * * 5` | `WEEKLY` |
 | Mensal | Último dia 23:59 | `59 23 28-31 * *` | `MONTHLY` |
 
 > ℹ️ Para gerar snapshots históricos retroativos, use o endpoint `POST /portfolio-snapshots/generate-range`.
@@ -380,7 +508,7 @@ importAllIncomeEvents().then(r => console.log(JSON.stringify(r, null, 2)));
 $headers = @{ Authorization = "Bearer SEU_TOKEN" }
 Invoke-RestMethod -Uri "http://localhost:3000/portfolio-snapshots/generate-range" `
   -Method Post -Headers $headers -ContentType "application/json" `
-  -Body '{"startDate":"2026-01-01","endDate":"2026-05-23","period":"DAILY"}'
+  -Body '{"startDate":"2026-01-01","endDate":"2026-05-26","period":"DAILY"}'
 ```
 
 ---
@@ -399,13 +527,39 @@ Roda **1x por dia, segunda a sexta**, após fechamento do mercado:
   - `openPrice` ← `unitaryInvestmentValue` (PU Compra do dia)
   - `source` = `'radaropcoes'`
 - Atualiza `marketPrice` no `PortfolioItem` correspondente
-- Usa `skipDuplicates` implícito — verifica existência antes de inserir
+- Verifica existência antes de inserir — seguro para múltiplas execuções no mesmo dia
 
 **Executar manualmente:**
 ```bash
 docker compose exec api node -e "
 const { importTreasuryPrices } = require('./dist/jobs/treasury-import.cron');
 importTreasuryPrices().then(r => console.log(JSON.stringify(r, null, 2)));
+"
+```
+
+---
+
+### Accrual de Renda Fixa Privada — `fixed-income-accrual.cron.ts`
+
+Roda **1x por dia, segunda a sexta**, após o snapshot diário:
+
+| Horário BRT | Horário UTC | Expressão cron |
+|---|---|---|
+| Seg–Sex 18:45 | 21:45 | `45 21 * * 1-5` |
+
+- Busca todas as posições `FIXED_INCOME` ativas de uma vez
+- Chama `getMacroRates()` **uma única vez** por execução — taxas CDI/SELIC/IPCA do dia (cache 1h)
+- Para cada posição, calcula `grossValue` por accrual (juros compostos) e persiste `marketValue`, `unrealizedPnL` e `lastUpdatedAt`
+- Fórmulas por indexador:
+  - **CDI / SELIC** → `principal × (1 + baseRate × purchaseRate)^(diasCorridos/252)`
+  - **IPCA / IGPM** → `principal × (1 + ipca + purchaseRate)^(diasCorridos/365)`
+  - **PREFIXADO** → `principal × (1 + purchaseRate)^(diasCorridos/365)`
+
+**Executar manualmente:**
+```bash
+docker compose exec api node -e "
+const { runFixedIncomeAccrual } = require('./dist/jobs/fixed-income-accrual.cron');
+runFixedIncomeAccrual().then(r => console.log(JSON.stringify(r, null, 2)));
 "
 ```
 
@@ -423,6 +577,14 @@ Usado para ações, FIIs, ETFs, BDRs e ativos internacionais.
 | `getCurrentPrices(tickers[])` | BRAPI | Cotação atual em batch (fallback individual) |
 | `getYahooCurrentPrice(ticker)` | Yahoo Finance | Cotação atual de ativo internacional |
 | `getDividends(ticker)` | Yahoo Finance | Dividendos históricos |
+
+### BRAPI Rates — `brapi-rates.provider.ts`
+
+Usado pelo cron de accrual de renda fixa para obter taxas macro diárias.
+
+| Método | Descrição |
+|---|---|
+| `getMacroRates()` | Retorna `{ cdi, selic, ipca }` em formato decimal anual (cache 1h) |
 
 ---
 
@@ -475,11 +637,11 @@ O `investedAmount` é calculado percorrendo todas as transações `BUY` e `SELL`
 
 Isso garante que resgates parciais anteriores não distorçam o custo da posição remanescente.
 
-### Fórmula P&L
+### Fórmula P&L (posição aberta)
 
 ```
 Valor de Mercado  = quantity × unitaryRedemptionValue
-Custo (WAVG)      = avgCost × quantity  (desconta cotas já vendidas)
+Custo (WAVG)      = avgCost × quantity
 Lucro Bruto       = Valor de Mercado − Custo
 IOF               = Lucro Bruto × iofRate  (apenas se < 30 dias)
 Base IR           = Lucro Bruto × (1 − iofRate)
@@ -488,7 +650,44 @@ Lucro Líquido     = Lucro Bruto − IOF − IR
 Valor Líquido     = Custo + Lucro Líquido
 ```
 
+### Fórmula P&L (resgate)
+
+```
+Gross Proceeds    = quantityRedeemed × redeemUnitPrice
+Cost Basis        = avgCost × quantityRedeemed
+Gross PnL         = Gross Proceeds − Cost Basis
+IOF               = Gross PnL × iofRate  (prazo da compra mais antiga — FIFO fiscal)
+IR                = (Gross PnL − IOF) × irRate
+Net PnL           = Gross PnL − IOF − IR
+Net Proceeds      = Cost Basis + Net PnL
+```
+
 > ℹ️ IR e IOF incidem apenas sobre rendimento positivo. Posições com `grossPnL < 0` retornam `irAmount = 0` e `iofAmount = 0`.
+
+---
+
+## Lógica de Cálculo — Renda Fixa Privada
+
+O serviço `fixed-income.service.ts` aplica accrual diário e regras fiscais por subtipo:
+
+### Accrual por Indexador
+
+| Indexer | Fórmula |
+|---|---|
+| `CDI` / `SELIC` | `principal × (1 + baseRate × purchaseRate)^(dias/252)` |
+| `IPCA` / `IGPM` | `principal × (1 + ipca + purchaseRate)^(dias/365)` |
+| `PREFIXADO` | `principal × (1 + purchaseRate)^(dias/365)` |
+
+### Tributação por Subtipo
+
+| Subtipo | IR | IOF | Observação |
+|---|---|---|---|
+| `CDB` | Regressivo (22,5% → 15%) | Sim (30 dias) | Mesma tabela do Tesouro Direto |
+| `LCI` / `LCA` / `LIG` | **Isento (PF)** | Não | Isenção garantida por lei |
+| `CRI` / `CRA` | **Isento (PF)** | Não | Isenção garantida por lei |
+| `DEBENTURE` incentivada | **Isento (PF)** | Não | Lei 12.431/2011 |
+| `DEBENTURE` comum | Regressivo | Sim (30 dias) | Mesma tabela do CDB |
+| `OTHER` | Regressivo | Sim (30 dias) | Conservador — aplica tabela padrão |
 
 ---
 
@@ -514,12 +713,12 @@ npx prisma generate
 
 | Model | Descrição |
 |---|---|
-| `AssetClass` | Classificação macro (DOMESTIC_STOCK, FII, TREASURY…) |
-| `Asset` | Ativo individual — ticker, nome, classe, indexer, maturityDate |
+| `AssetClass` | Classificação macro (DOMESTIC_STOCK, FII, TREASURY, FIXED_INCOME…) |
+| `Asset` | Ativo individual — ticker, nome, classe, indexer, maturityDate, issuer |
 | `Transaction` | Compra, venda e demais movimentos financeiros |
 | `PriceHistory` | OHLCV diário por ativo (B3, Yahoo e Tesouro Direto) |
 | `IncomeEvent` | Proventos recebidos (dividendo, JCP, rendimento FII) |
-| `PortfolioItem` | Posição consolidada — quantidade, preço médio, market value |
+| `PortfolioItem` | Posição consolidada — quantidade, preço médio, market value, unrealizedPnL |
 | `PortfolioSnapshot` | Fotografia do portfólio em uma data (DAILY/WEEKLY/MONTHLY) |
 | `PortfolioAssetSnapshot` | Detalhe por ativo dentro do snapshot |
 | `PortfolioClassSnapshot` | Detalhe por classe dentro do snapshot |
@@ -527,7 +726,8 @@ npx prisma generate
 | `Institution` | Corretoras e bancos |
 | `Account` | Contas dentro de uma instituição |
 
-> ℹ️ Tesouro Direto usa os mesmos models `Asset` (`assetType=BOND`, `assetClassId=TREASURY`) e `PriceHistory` — sem tabelas exclusivas.
+> ℹ️ Tesouro Direto e Renda Fixa Privada usam os mesmos models `Asset` e `PriceHistory` — sem tabelas exclusivas.  
+> ℹ️ Renda Fixa usa `asset.indexer`, `asset.issuer` e `transaction.unitPrice` (como `purchaseRate`) para calcular accrual.
 
 ---
 
@@ -540,38 +740,29 @@ npx prisma generate
 - [x] Cron de importação de preços B3 + Yahoo Finance (5x/dia, seg–sex)
 - [x] Cron de importação de proventos semanal (Yahoo Finance, skipDuplicates)
 - [x] Endpoints de alocação, performance e dividendos
-- [x] **Módulo Tesouro Direto completo** — cadastro de títulos, cálculo de P&L com custo médio ponderado (WAVG), IR regressivo, IOF, cron diário via radaropcoes.com e suporte a resgates parciais
+- [x] **Módulo Tesouro Direto completo** — cadastro, P&L com WAVG, IR regressivo, IOF, cron diário (radaropcoes.com), resgate parcial/total com cálculo fiscal e arquivamento de posição
+- [x] **Módulo Renda Fixa Privada completo** — CDB / LCI / LCA / LIG / CRI / CRA / Debêntures, accrual por indexador (CDI/SELIC/IPCA/IGPM/PREFIXADO), IR/IOF regressivo, isenção automática por subtipo, resgate com P&L realizado
+- [x] **Cron de accrual de Renda Fixa** — atualização diária de `marketValue` e `unrealizedPnL` com taxas reais (BRAPI), seg–sex 18:45 BRT
 
 ### 🔴 Alta Prioridade
-- [ ] **Tesouro Direto — endpoint de resgate (SELL)**
-  - Registrar resgate parcial ou total via `POST /treasury/:assetId/redeem`
-  - Criar transação `SELL`, atualizar `PortfolioItem.quantity` e `realizedPnL`
-  - Calcular IR e IOF sobre o ganho realizado e retornar imposto devido
-  - Zerar ou arquivar posição quando `quantity = 0`
-- [ ] **Renda fixa privada — CDB / LCI / LCA / LIG / CRI / CRA / Debêntures**
-  - Suporte a rentabilidade `% CDI`, `IPCA+` e prefixada
-  - Cálculo de valor bruto, IR regressivo, IOF e valor líquido na data
-  - LCI / LCA / LIG / CRI / CRA: isenção de IR para pessoa física
-  - CDB: mesma tabela regressiva do Tesouro Direto
-  - Debêntures incentivadas: isenção de IR
-  - Campo `issuer` e `rateIndex` no `Asset`; campo `purchaseRate` e `rateType` na `Transaction`
-- [ ] **Tesouro Direto — import histórico via CSV do Tesouro Transparente**
-  - Carga retroativa de PriceHistory desde a data de compra
-  - Fonte: `tesourotransparente.gov.br` (CSV diário público, sem autenticação)
-  - Útil para popular P&L histórico dos títulos já cadastrados
 - [ ] **Frontend — dashboard principal**
-  - Gráfico de evolução do patrimônio consumindo snapshots DAILY
+  - Gráfico de evolução do patrimônio consumindo snapshots `DAILY`
   - Cards de KPIs: patrimônio atual, rentabilidade, proventos recebidos, rendimento líquido
   - Tabela de posição por ativo com P&L, IR estimado e % da carteira
   - Gráfico de alocação por classe vs. meta
+  - Seção de Tesouro Direto com tabela de títulos e P&L líquido
+  - Seção de Renda Fixa Privada com accrual atualizado e status de isenção
+- [ ] **Tesouro Direto — import histórico via CSV do Tesouro Transparente**
+  - Carga retroativa de `PriceHistory` desde a data de compra
+  - Fonte: `tesourotransparente.gov.br` (CSV diário público, sem autenticação)
 
 ### 🟡 Média Prioridade
 - [ ] **IRR / XIRR** — retorno real da carteira considerando timing e valor de cada aporte
 - [ ] **Benchmark** — comparar rentabilidade vs. CDI, IBOV e IPCA (série histórica diária)
 - [ ] **Importação via corretora** — leitura de notas de corretagem (PDF/XLSX) para cadastro automático de transações
 - [ ] **Alertas de preço** — notificação quando ativo atingir preço-alvo (e-mail ou webhook)
-- [ ] **Testes automatizados** — cobertura mínima nos services críticos (snapshots, portfolio-items, treasury, price-import)
-- [ ] **Tesouro Direto — BRAPI Pro** — migrar provider de radaropcoes para BRAPI `/api/v2/treasury` se plano Pro for contratado (histórico nativo, slugs fixos)
+- [ ] **Testes automatizados** — cobertura mínima nos services críticos (snapshots, portfolio-items, treasury, fixed-income, price-import)
+- [ ] **Tesouro Direto — BRAPI Pro** — migrar provider de radaropcoes para BRAPI `/api/v2/treasury` se plano Pro for contratado
 
 ### 🟢 Baixa Prioridade
 - [ ] **Multi-carteira** — suporte a múltiplas carteiras por usuário (pessoal, PGBL, previdência, carteira do cônjuge)

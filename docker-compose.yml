@@ -11,9 +11,7 @@ services:
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
-      # Volume anônimo existente com os dados do banco — NÃO remover
       - postgres_data:/var/lib/postgresql
-      # Scripts de inicialização do banco (já existia no projeto)
       - ./docker/initdb:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${APP_DB_USER:-app_user} -d ${POSTGRES_DB:-sig_db}"]
@@ -44,14 +42,25 @@ services:
     ports:
       - "${APP_PORT}:3000"
       - "55550:5555"
-    
+    networks:
+      - sig_network
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: http://api:3000
+    ports:
+      - "3001:3001"
     networks:
       - sig_network
 
 volumes:
   postgres_data:
-    # Aponta para o volume anônimo existente que contém os dados do banco
-    # Para encontrar o nome: docker inspect docker-db --format '{{json .Mounts}}'
     external: true
     name: e516aba4bda627c66c9cdc25d3326200db60d406b8e93598ca60664e580ac910
 
