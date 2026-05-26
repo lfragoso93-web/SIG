@@ -1,7 +1,7 @@
 import { Decimal } from '@prisma/client/runtime/library'
 import { prisma }  from '../../core/prisma/prisma.service'
 import { radarOpcoesClient } from '../../providers/radaropcoes/radaropcoes.client'
-import type { CreateTreasuryBondDto, UpdateTreasuryBondDto } from './treasury.schema'
+import type { CreateTreasuryBondDto, UpdateTreasuryBondDto, RedeemTreasuryBondDto } from './treasury.schema'
 import { Prisma } from '@prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -30,7 +30,6 @@ function calcIrRate(firstPurchaseDate: Date, referenceDate: Date = new Date()): 
   const days = Math.floor(
     (referenceDate.getTime() - firstPurchaseDate.getTime()) / (1000 * 60 * 60 * 24),
   )
-  // Garante que não retorne undefined para dias negativos
   return (IR_TABLE.find(t => days <= t.maxDays) ?? IR_TABLE[IR_TABLE.length - 1]).rate
 }
 
@@ -44,9 +43,38 @@ function calcIofRate(firstPurchaseDate: Date, referenceDate: Date = new Date()):
   const days = Math.floor(
     (referenceDate.getTime() - firstPurchaseDate.getTime()) / (1000 * 60 * 60 * 24),
   )
-  if (days <= 0)  return 1          // mesmo dia
-  if (days >= 30) return 0          // isento
-  return IOF_TABLE[days - 1] / 100  // dias 1..29
+  if (days <= 0)  return 1
+  if (days >= 30) return 0
+  return IOF_TABLE[days - 1] / 100
+}
+
+/**
+ * Calcula o custo médio ponderado (WAVG) e a quantidade atual
+ * percorrendo todas as transações BUY/SELL de um ativo em ordem cronológica.
+ */
+async function calcWavg(assetId: string): Promise<{ avgCost: number; totalQty: number }> {
+  const allTxs = await prisma.transaction.findMany({
+    where:   { assetId, type: { in: ['BUY', 'SELL'] } },
+    orderBy: { tradeDate: 'asc' },
+    select:  { type: true, quantity: true, unitPrice: true },
+  })
+
+  let avgCost  = 0
+  let totalQty = 0
+
+  for (const tx of allTxs) {
+    const qty   = Math.abs(Number(tx.quantity))
+    const price = Number(tx.unitPrice)
+
+    if (tx.type === 'BUY') {
+      avgCost  = (avgCost * totalQty + price * qty) / (totalQty + qty)
+      totalQty = totalQty + qty
+    } else {
+      totalQty = Math.max(0, totalQty - qty)
+    }
+  }
+
+  return { avgCost, totalQty }
 }
 
 // ---------------------------------------------------------------------------
@@ -149,54 +177,15 @@ export async function listTreasuryBonds() {
   const result = await Promise.all(
     items.map(async (item: PortfolioItemWithAsset) => {
 
-      // -----------------------------------------------------------------
-      // 1. Busca a transação BUY mais antiga para usar como data de compra
-      //    no cálculo de IR e IOF (FIFO).
-      // -----------------------------------------------------------------
       const firstBuy = await prisma.transaction.findFirst({
         where:   { assetId: item.assetId, type: 'BUY' },
         orderBy: { tradeDate: 'asc' },
         select:  { tradeDate: true },
       })
 
-      // -----------------------------------------------------------------
-      // 2. Calcula o custo médio ponderado (WAVG) das cotas em carteira,
-      //    descontando o custo das cotas já vendidas.
-      //
-      //    Algoritmo WAVG:
-      //      - Percorre todas as transações BUY e SELL em ordem cronológica.
-      //      - A cada BUY: atualiza preço médio e quantidade acumulada.
-      //      - A cada SELL: reduz a quantidade sem alterar o preço médio.
-      //      - investedAmount = quantidade atual × preço médio final.
-      // -----------------------------------------------------------------
-      const allTxs = await prisma.transaction.findMany({
-        where:   { assetId: item.assetId, type: { in: ['BUY', 'SELL'] } },
-        orderBy: { tradeDate: 'asc' },
-        select:  { type: true, quantity: true, unitPrice: true },
-      })
-
-      let avgCost  = 0
-      let totalQty = 0
-
-      for (const tx of allTxs) {
-        const qty   = Math.abs(Number(tx.quantity))
-        const price = Number(tx.unitPrice)
-
-        if (tx.type === 'BUY') {
-          // Novo preço médio ponderado
-          avgCost  = (avgCost * totalQty + price * qty) / (totalQty + qty)
-          totalQty = totalQty + qty
-        } else {
-          // SELL: apenas reduz a quantidade, preço médio permanece
-          totalQty = Math.max(0, totalQty - qty)
-        }
-      }
-
+      const { avgCost, totalQty } = await calcWavg(item.assetId)
       const investedAmount = avgCost * totalQty
 
-      // -----------------------------------------------------------------
-      // 3. PU de resgate mais recente
-      // -----------------------------------------------------------------
       const lastPrice = await prisma.priceHistory.findFirst({
         where:   { assetId: item.assetId },
         orderBy: { priceDate: 'desc' },
@@ -207,15 +196,11 @@ export async function listTreasuryBonds() {
       const marketValue = redeemPrice !== null ? qty * redeemPrice : null
       const grossPnL    = marketValue !== null ? marketValue - investedAmount : null
 
-      // -----------------------------------------------------------------
-      // 4. IR e IOF usando a data real de compra
-      // -----------------------------------------------------------------
       const purchaseDate = firstBuy?.tradeDate ?? item.createdAt
       const today        = new Date()
       const irRate       = calcIrRate(purchaseDate, today)
       const iofRate      = calcIofRate(purchaseDate, today)
 
-      // IR e IOF incidem apenas sobre rendimento positivo
       const gain      = grossPnL !== null && grossPnL > 0 ? grossPnL : 0
       const iofAmount = gain * iofRate
       const irAmount  = (gain - iofAmount) * irRate
@@ -267,6 +252,153 @@ export async function updateTreasuryBond(assetId: string, dto: UpdateTreasuryBon
   if (dto.bondName)               data.name        = dto.bondName
 
   return prisma.asset.update({ where: { id: assetId }, data })
+}
+
+/**
+ * Registra o resgate (parcial ou total) de um título do Tesouro Direto.
+ *
+ * Fluxo:
+ *  1. Valida a posição e a quantidade solicitada.
+ *  2. Resolve o PU de resgate (parâmetro ou último closePrice).
+ *  3. Calcula o P&L realizado com IR (FIFO) e IOF.
+ *  4. Cria transação SELL.
+ *  5. Atualiza PortfolioItem: reduz quantity, recalcula investedAmount e realizedPnL.
+ *  6. Arquiva a posição (isActive = false) se quantity = 0.
+ */
+export async function redeemTreasuryBond(assetId: string, dto: RedeemTreasuryBondDto) {
+  // ------------------------------------------------------------------
+  // 1. Carregar posição atual
+  // ------------------------------------------------------------------
+  const portfolioItem = await prisma.portfolioItem.findFirst({
+    where:   { assetId },
+    include: { asset: true },
+  })
+
+  if (!portfolioItem) {
+    throw Object.assign(new Error('Posição não encontrada.'), { status: 404 })
+  }
+
+  const currentQty = Number(portfolioItem.quantity)
+
+  if (dto.quantity > currentQty) {
+    throw Object.assign(
+      new Error(`Quantidade solicitada (${dto.quantity}) excede a posição atual (${currentQty}).`),
+      { status: 422 },
+    )
+  }
+
+  // ------------------------------------------------------------------
+  // 2. Resolver PU de resgate
+  // ------------------------------------------------------------------
+  let redeemUnitPrice = dto.redeemUnitPrice
+
+  if (!redeemUnitPrice) {
+    const lastPrice = await prisma.priceHistory.findFirst({
+      where:   { assetId },
+      orderBy: { priceDate: 'desc' },
+    })
+
+    if (!lastPrice) {
+      throw Object.assign(
+        new Error('Nenhum preço disponível. Informe redeemUnitPrice manualmente.'),
+        { status: 422 },
+      )
+    }
+
+    redeemUnitPrice = Number(lastPrice.closePrice)
+  }
+
+  // ------------------------------------------------------------------
+  // 3. Calcular custo médio ponderado (WAVG) das cotas a resgatar
+  // ------------------------------------------------------------------
+  const { avgCost } = await calcWavg(assetId)
+
+  const redeemDate  = dto.redeemDate ? new Date(dto.redeemDate) : new Date()
+  const grossProceeds = dto.quantity * redeemUnitPrice
+  const costBasis     = avgCost * dto.quantity
+  const grossPnL      = grossProceeds - costBasis
+
+  // ------------------------------------------------------------------
+  // 4. IR (FIFO) e IOF
+  // ------------------------------------------------------------------
+  const firstBuy = await prisma.transaction.findFirst({
+    where:   { assetId, type: 'BUY' },
+    orderBy: { tradeDate: 'asc' },
+    select:  { tradeDate: true },
+  })
+
+  const purchaseDate = firstBuy?.tradeDate ?? portfolioItem.createdAt
+  const irRate  = calcIrRate(purchaseDate, redeemDate)
+  const iofRate = calcIofRate(purchaseDate, redeemDate)
+
+  const gain      = grossPnL > 0 ? grossPnL : 0
+  const iofAmount = gain * iofRate
+  const irAmount  = (gain - iofAmount) * irRate
+  const netPnL    = grossPnL - iofAmount - irAmount
+  const netProceeds = grossProceeds - iofAmount - irAmount
+
+  // ------------------------------------------------------------------
+  // 5. Persistência em transação atômica
+  // ------------------------------------------------------------------
+  const newQty        = currentQty - dto.quantity
+  const positionClosed = newQty === 0
+
+  const [sellTx] = await prisma.$transaction([
+    // Cria a transação de venda
+    prisma.transaction.create({
+      data: {
+        assetId,
+        accountId:   portfolioItem.accountId,
+        type:        'SELL',
+        tradeDate:   redeemDate,
+        quantity:    new Decimal(dto.quantity),
+        unitPrice:   new Decimal(redeemUnitPrice),
+        grossAmount: new Decimal(grossProceeds),
+        netAmount:   new Decimal(netProceeds),
+        currencyCode: 'BRL',
+        description: `Resgate Tesouro Direto — ${portfolioItem.asset.name}`,
+      },
+    }),
+
+    // Atualiza o PortfolioItem
+    prisma.portfolioItem.update({
+      where: { id: portfolioItem.id },
+      data: {
+        quantity:       new Decimal(newQty),
+        investedAmount: new Decimal(avgCost * newQty),
+        realizedPnL:    { increment: new Decimal(netPnL) },
+        marketValue:    new Decimal(newQty * redeemUnitPrice),
+        isActive:       positionClosed ? false : true,
+      },
+    }),
+
+    // Arquiva o Asset se a posição foi zerada
+    ...(positionClosed
+      ? [prisma.asset.update({
+          where: { id: assetId },
+          data:  { isActive: false },
+        })]
+      : []),
+  ])
+
+  return {
+    assetId,
+    bondName:          portfolioItem.asset.name,
+    quantityRedeemed:  dto.quantity,
+    quantityRemaining: newQty,
+    redeemUnitPrice,
+    grossProceeds,
+    costBasis,
+    grossPnL,
+    irRate,
+    iofRate,
+    irAmount,
+    iofAmount,
+    netPnL,
+    netProceeds,
+    positionClosed,
+    transactionId: sellTx.id,
+  }
 }
 
 /**

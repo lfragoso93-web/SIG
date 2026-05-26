@@ -31,3 +31,13 @@ export const UpdateTreasuryBondDto = CreateTreasuryBondDto.partial().extend({
   isActive: z.boolean().optional(),
 })
 export type UpdateTreasuryBondDto = z.infer<typeof UpdateTreasuryBondDto>
+
+export const RedeemTreasuryBondDto = z.object({
+  /** Quantidade de cotas a resgatar (> 0, <= posição atual) */
+  quantity:         z.number().positive(),
+  /** Data do resgate (YYYY-MM-DD). Default: hoje */
+  redeemDate:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  /** PU de resgate. Default: último closePrice em PriceHistory */
+  redeemUnitPrice:  z.number().positive().optional(),
+})
+export type RedeemTreasuryBondDto = z.infer<typeof RedeemTreasuryBondDto>
