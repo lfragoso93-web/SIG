@@ -6,6 +6,11 @@ import {
   type BrapiInterval,
   type BrapiRange,
 } from '../../providers/brapi/brapi.client'
+import { radarOpcoesClient } from '../../providers/radaropcoes/radaropcoes.client'
+
+// ---------------------------------------------------------------------------
+// BRAPI import (ações, FIIs, etc.)
+// ---------------------------------------------------------------------------
 
 interface ImportPriceHistoryInput {
   ticker:     string
@@ -70,6 +75,70 @@ class PriceHistoryImportService {
     return { assetId: asset.id, ticker: asset.ticker, requested, inserted, skipped }
   }
 
+  // ---------------------------------------------------------------------------
+  // RadarOpcoes import (Tesouro Direto)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Busca o PU de mercado atual de um título do Tesouro Direto via RadarOpcoes
+   * e grava (upsert) em PriceHistory com a data de hoje.
+   *
+   * @param bondName  Nome exato do título, ex: "Tesouro IPCA+ 2035"
+   */
+  async importFromRadarOpcoes(bondName: string): Promise<ImportPriceHistoryResult> {
+    const bond = await radarOpcoesClient.getBond(bondName)
+
+    // Deriva o ticker da mesma forma que treasury.service.ts
+    const ticker = bondName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '')
+
+    const asset = await prisma.asset.findUnique({
+      where:  { ticker },
+      select: { id: true, ticker: true },
+    })
+
+    if (!asset) {
+      throw new Error(
+        `Ativo "${bondName}" (ticker: ${ticker}) não encontrado. Cadastre o título primeiro via POST /treasury.`,
+      )
+    }
+
+    const today = new Date()
+    today.setUTCHours(0, 0, 0, 0)
+
+    const pu = new Prisma.Decimal(bond.unitaryRedemptionValue)
+
+    const existing = await prisma.priceHistory.findFirst({
+      where: { assetId: asset.id, priceDate: today },
+    })
+
+    if (existing) {
+      await prisma.priceHistory.update({
+        where: { id: existing.id },
+        data:  { closePrice: pu },
+      })
+      return { assetId: asset.id, ticker: asset.ticker, requested: 1, inserted: 0, skipped: 1 }
+    }
+
+    await prisma.priceHistory.create({
+      data: {
+        assetId:      asset.id,
+        priceDate:    today,
+        closePrice:   pu,
+        currencyCode: 'BRL',
+        source:       'RADAR_OPCOES',
+      },
+    })
+
+    return { assetId: asset.id, ticker: asset.ticker, requested: 1, inserted: 1, skipped: 0 }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
   private validateInput(input: ImportPriceHistoryInput): void {
     const hasStartDate = !!input.startDate
     const hasEndDate   = !!input.endDate
@@ -79,9 +148,9 @@ class PriceHistoryImportService {
   }
 
   private normalizeRows(
-    assetId:             string,
+    assetId:              string,
     fallbackCurrencyCode: string,
-    rows:                BrapiHistoricalPriceRow[],
+    rows:                 BrapiHistoricalPriceRow[],
   ): Prisma.PriceHistoryCreateManyInput[] {
     const deduplicated = new Map<string, Prisma.PriceHistoryCreateManyInput>()
 
