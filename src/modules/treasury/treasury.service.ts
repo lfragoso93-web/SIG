@@ -2,6 +2,7 @@ import { Decimal } from '@prisma/client/runtime/library'
 import { prisma }  from '../../core/prisma/prisma.service'
 import { radarOpcoesClient } from '../../providers/radaropcoes/radaropcoes.client'
 import type { CreateTreasuryBondDto, UpdateTreasuryBondDto } from './treasury.schema'
+import { Prisma } from '@prisma/client'
 
 // ---------------------------------------------------------------------------
 // Constantes IR regressivo (Tesouro Direto)
@@ -14,7 +15,6 @@ const IR_TABLE = [
   { maxDays: Infinity, rate: 0.150 },
 ]
 
-// Tabela IOF regressiva dias 1-30 (percentual sobre o lucro)
 const IOF_TABLE = [
   96, 93, 90, 86, 83, 80, 76, 73, 70, 66,
   63, 60, 56, 53, 50, 46, 43, 40, 36, 33,
@@ -38,12 +38,13 @@ function calcIofRate(purchaseDate: Date, referenceDate: Date = new Date()): numb
 }
 
 // ---------------------------------------------------------------------------
-// Tipos internos
+// Tipo explícito com include para garantir que .asset esteja disponível
 // ---------------------------------------------------------------------------
 
-type PortfolioItemWithAsset = Awaited<
-  ReturnType<typeof prisma.portfolioItem.findMany>
->[number]
+const portfolioItemWithAsset = Prisma.validator<Prisma.PortfolioItemDefaultArgs>()({
+  include: { asset: true },
+})
+type PortfolioItemWithAsset = Prisma.PortfolioItemGetPayload<typeof portfolioItemWithAsset>
 
 // ---------------------------------------------------------------------------
 // CRUD
@@ -58,6 +59,10 @@ export async function createTreasuryBond(dto: CreateTreasuryBondDto) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '')
+
+  // accountId: Prisma exige string para o campo do unique composto;
+  // usamos string vazia como sentinela para "sem conta".
+  const accountId = dto.accountId ?? ''
 
   const asset = await prisma.asset.upsert({
     where:  { ticker },
@@ -78,28 +83,28 @@ export async function createTreasuryBond(dto: CreateTreasuryBondDto) {
 
   const transaction = await prisma.transaction.create({
     data: {
-      assetId:     asset.id,
-      accountId:   dto.accountId ?? null,
-      type:        'BUY',
-      tradeDate:   new Date(dto.purchaseDate),
-      quantity:    new Decimal(dto.quantity),
-      unitPrice:   new Decimal(dto.purchaseUnitValue),
+      assetId:      asset.id,
+      accountId:    dto.accountId ?? null,
+      type:         'BUY',
+      tradeDate:    new Date(dto.purchaseDate),
+      quantity:     new Decimal(dto.quantity),
+      unitPrice:    new Decimal(dto.purchaseUnitValue),
       grossAmount,
-      netAmount:   grossAmount,
+      netAmount:    grossAmount,
       currencyCode: 'BRL',
-      description: `Compra Tesouro Direto — ${dto.bondName} @ ${dto.purchaseRate}% a.a.`,
+      description:  `Compra Tesouro Direto — ${dto.bondName} @ ${dto.purchaseRate}% a.a.`,
     },
   })
 
   const item = await prisma.portfolioItem.upsert({
-    where: { assetId_accountId: { assetId: asset.id, accountId: dto.accountId ?? null } },
+    where: { assetId_accountId: { assetId: asset.id, accountId } },
     update: {
       quantity:       { increment: new Decimal(dto.quantity) },
       investedAmount: { increment: grossAmount },
     },
     create: {
       assetId:        asset.id,
-      accountId:      dto.accountId ?? null,
+      accountId,
       quantity:       new Decimal(dto.quantity),
       averagePrice:   new Decimal(dto.purchaseUnitValue),
       investedAmount: grossAmount,
@@ -117,7 +122,7 @@ export async function listTreasuryBonds() {
     where: { code: 'TREASURY' },
   })
 
-  const items = await prisma.portfolioItem.findMany({
+  const items: PortfolioItemWithAsset[] = await prisma.portfolioItem.findMany({
     where:   { asset: { assetClassId: treasuryClass.id } },
     include: { asset: true },
     orderBy: { asset: { maturityDate: 'asc' } },
@@ -176,7 +181,7 @@ export async function listTreasuryBonds() {
 
 export async function getTreasuryBond(assetId: string) {
   const items = await listTreasuryBonds()
-  const item  = items.find((i: { assetId: string }) => i.assetId === assetId)
+  const item  = items.find(i => i.assetId === assetId)
   if (!item) throw Object.assign(new Error('Título não encontrado.'), { status: 404 })
   return item
 }
@@ -184,10 +189,10 @@ export async function getTreasuryBond(assetId: string) {
 export async function updateTreasuryBond(assetId: string, dto: UpdateTreasuryBondDto) {
   const data: Record<string, unknown> = {}
 
-  if (dto.indexer)               data.indexer      = dto.indexer
-  if (dto.maturityDate)          data.maturityDate  = new Date(dto.maturityDate)
-  if (dto.isActive !== undefined) data.isActive     = dto.isActive
-  if (dto.bondName)              data.name          = dto.bondName
+  if (dto.indexer)                data.indexer     = dto.indexer
+  if (dto.maturityDate)           data.maturityDate = new Date(dto.maturityDate)
+  if (dto.isActive !== undefined) data.isActive    = dto.isActive
+  if (dto.bondName)               data.name        = dto.bondName
 
   return prisma.asset.update({ where: { id: assetId }, data })
 }
