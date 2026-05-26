@@ -60,9 +60,8 @@ export async function createTreasuryBond(dto: CreateTreasuryBondDto) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '')
 
-  // accountId: Prisma exige string para o campo do unique composto;
-  // usamos string vazia como sentinela para "sem conta".
-  const accountId = dto.accountId ?? ''
+  // accountId é null quando não informado (FK aceita null; string vazia quebraria a constraint)
+  const accountId = dto.accountId ?? null
 
   const asset = await prisma.asset.upsert({
     where:  { ticker },
@@ -84,7 +83,7 @@ export async function createTreasuryBond(dto: CreateTreasuryBondDto) {
   const transaction = await prisma.transaction.create({
     data: {
       assetId:      asset.id,
-      accountId:    dto.accountId ?? null,
+      accountId,
       type:         'BUY',
       tradeDate:    new Date(dto.purchaseDate),
       quantity:     new Decimal(dto.quantity),
@@ -97,7 +96,7 @@ export async function createTreasuryBond(dto: CreateTreasuryBondDto) {
   })
 
   const item = await prisma.portfolioItem.upsert({
-    where: { assetId_accountId: { assetId: asset.id, accountId } },
+    where:  { assetId_accountId: { assetId: asset.id, accountId } },
     update: {
       quantity:       { increment: new Decimal(dto.quantity) },
       investedAmount: { increment: grossAmount },
