@@ -88,6 +88,12 @@ class PriceHistoryImportService {
   async importFromRadarOpcoes(bondName: string): Promise<ImportPriceHistoryResult> {
     const bond = await radarOpcoesClient.getBond(bondName)
 
+    if (bond.unitaryRedemptionValue == null) {
+      throw new Error(
+        `Título "${bondName}" retornou PU nulo. O mercado pode estar fechado ou o título indisponível.`,
+      )
+    }
+
     // Deriva o ticker da mesma forma que treasury.service.ts
     const ticker = bondName
       .toLowerCase()
