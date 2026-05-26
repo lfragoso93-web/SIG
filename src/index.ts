@@ -21,6 +21,7 @@ import { startSnapshotCrons }       from './jobs/snapshot.cron'
 import { startPriceCron }           from './jobs/price-import.cron'
 import { startIncomeCron }          from './jobs/income-import.cron'
 import { startTreasuryCron }        from './jobs/treasury-import.cron'
+import { startFixedIncomeAccrualCron } from './jobs/fixed-income-accrual.cron'
 
 const app  = express()
 const PORT = Number(process.env.PORT ?? 3001)
@@ -56,4 +57,5 @@ app.listen(PORT, HOST, () => {
   startPriceCron()
   startIncomeCron()
   startTreasuryCron()
+  startFixedIncomeAccrualCron()
 })
