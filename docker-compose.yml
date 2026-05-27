@@ -31,14 +31,14 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
-      PORT:         3000
-      NODE_ENV:     ${NODE_ENV:-production}
-      JWT_SECRET:   ${JWT_SECRET}
-      JWT_EXPIRES:  ${JWT_EXPIRES:-8h}
-      APP_USERNAME: ${APP_USERNAME}
-      APP_PASSWORD: ${APP_PASSWORD}
-      CORS_ORIGIN:  http://web:3001
+      DATABASE_URL:             postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      PORT:                     3000
+      NODE_ENV:                 ${NODE_ENV:-production}
+      JWT_SECRET:               ${JWT_SECRET}
+      JWT_EXPIRES:              ${JWT_EXPIRES:-8h}
+      INITIAL_ADMIN_USERNAME:   ${INITIAL_ADMIN_USERNAME:-admin}
+      INITIAL_ADMIN_PASSWORD:   ${INITIAL_ADMIN_PASSWORD}
+      CORS_ORIGIN:              http://web:3001
     ports:
       - "${API_PORT:-3000}:3000"
     networks:
