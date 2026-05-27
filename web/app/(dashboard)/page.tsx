@@ -6,32 +6,29 @@ import {
   PieChart, Pie, Cell,
 } from 'recharts'
 import { LayoutDashboard, TrendingUp, Wallet, HandCoins, BarChart3, AlertCircle, RefreshCw } from 'lucide-react'
-import { format, parseISO } from 'date-fns'
+import { format, parseISO, isValid } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { KpiCard } from '@/components/ui/kpi-card'
 import { useSnapshots, useAllocation, usePerformance, useDividends } from '@/lib/hooks/useDashboard'
 import { fmt } from '@/lib/utils'
 
-// Cores para o gráfico de alocação — sequência pensada para dark mode
 const ALLOCATION_COLORS = [
-  '#6366f1', // indigo  — primário
-  '#22c55e', // green
-  '#f59e0b', // amber
-  '#3b82f6', // blue
-  '#a855f7', // purple
-  '#ec4899', // pink
-  '#14b8a6', // teal
-  '#f97316', // orange
+  '#6366f1',
+  '#22c55e',
+  '#f59e0b',
+  '#3b82f6',
+  '#a855f7',
+  '#ec4899',
+  '#14b8a6',
+  '#f97316',
 ]
 
-// ---- Skeleton genérico ----
 function Skeleton({ className = '' }: { className?: string }) {
   return (
     <div className={`bg-[var(--color-surface-3)] rounded animate-pulse ${className}`} />
   )
 }
 
-// ---- Estado de erro reutilizável ----
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-10 text-center">
@@ -48,7 +45,6 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
   )
 }
 
-// ---- Tooltip customizado do gráfico de área ----
 function AreaTooltip({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string }) {
   if (!active || !payload?.length) return null
   return (
@@ -59,7 +55,6 @@ function AreaTooltip({ active, payload, label }: { active?: boolean; payload?: {
   )
 }
 
-// ---- Tooltip customizado do gráfico de pizza ----
 function PieTooltip({ active, payload }: { active?: boolean; payload?: { name: string; value: number; payload: { currentPercent: number } }[] }) {
   if (!active || !payload?.length) return null
   const d = payload[0]
@@ -79,16 +74,21 @@ export default function DashboardPage() {
   const perf       = usePerformance()
   const dividends  = useDividends()
 
-  // Dados formatados para o gráfico de área
+  // Guard: ignora snapshots sem snapshotDate válido antes de passar para o gráfico
   const chartData = useMemo(() => {
     if (!snapshots.data) return []
-    return snapshots.data.map((s) => ({
-      date:  format(parseISO(s.snapshotDate), 'dd/MM', { locale: ptBR }),
-      value: s.totalValue,
-    }))
+    return snapshots.data
+      .filter((s) => {
+        if (!s.snapshotDate) return false
+        const d = parseISO(s.snapshotDate)
+        return isValid(d)
+      })
+      .map((s) => ({
+        date:  format(parseISO(s.snapshotDate), 'dd/MM', { locale: ptBR }),
+        value: s.totalValue,
+      }))
   }, [snapshots.data])
 
-  // Último snapshot para o card de patrimônio
   const lastSnapshot = snapshots.data?.at(-1)
   const prevSnapshot = snapshots.data?.at(-2)
   const patrimonioDelta =
@@ -96,12 +96,10 @@ export default function DashboardPage() {
       ? lastSnapshot.totalValue - prevSnapshot.totalValue
       : undefined
 
-  // Proventos totais
   const totalDividends = dividends.data?.totalReceived ?? null
 
   return (
     <div className="p-6 lg:p-8">
-      {/* Header */}
       <div className="mb-8">
         <div className="flex items-center gap-2 text-[var(--color-text-muted)] text-xs mb-1">
           <LayoutDashboard size={13} />
@@ -113,7 +111,6 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
         <KpiCard
           label="Patrimônio Total"
@@ -149,10 +146,8 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Charts */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
 
-        {/* Gráfico de evolução do patrimônio */}
         <div className="xl:col-span-2 bg-[var(--color-surface-2)] border border-[var(--color-border-subtle)] rounded-xl p-5">
           <p className="text-sm font-medium mb-5">
             Evolução do Patrimônio
@@ -219,7 +214,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Gráfico de alocação por classe */}
         <div className="bg-[var(--color-surface-2)] border border-[var(--color-border-subtle)] rounded-xl p-5">
           <p className="text-sm font-medium mb-5">Alocação por Classe</p>
 
@@ -268,8 +262,6 @@ export default function DashboardPage() {
                   <Tooltip content={<PieTooltip />} />
                 </PieChart>
               </ResponsiveContainer>
-
-              {/* Legenda manual com % */}
               <ul className="mt-3 space-y-1.5">
                 {allocation.data.map((item, i) => (
                   <li key={item.assetClassCode} className="flex items-center justify-between text-xs">

@@ -38,7 +38,10 @@ services:
       JWT_EXPIRES:              ${JWT_EXPIRES:-8h}
       INITIAL_ADMIN_USERNAME:   ${INITIAL_ADMIN_USERNAME:-admin}
       INITIAL_ADMIN_PASSWORD:   ${INITIAL_ADMIN_PASSWORD}
-      CORS_ORIGIN:              http://web:3001
+      # CORS_ORIGIN deve conter a origem que o browser usa para acessar o frontend.
+      # Em desenvolvimento local: http://localhost:3001
+      # Em produção: https://seu-dominio.com
+      CORS_ORIGIN:              ${CORS_ORIGIN:-http://localhost:3001}
     ports:
       - "${API_PORT:-3000}:3000"
     networks:
@@ -52,7 +55,9 @@ services:
     depends_on:
       - api
     environment:
+      # URL usada pelo browser para chamar a API (deve ser acessível fora do Docker)
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000}
+      # URL interna usada pelo servidor Next.js (SSR/RSC) para chamar a API dentro da rede Docker
       INTERNAL_API_URL:    http://api:3000
       PORT:                3001
     ports:
