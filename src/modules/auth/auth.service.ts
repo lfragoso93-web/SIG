@@ -4,11 +4,16 @@ import { prisma } from '../../core/prisma/prisma.service'
 import { LoginInput } from './auth.schema'
 import { UnauthorizedError } from '../../shared/errors/AppError'
 
-const JWT_SECRET  = process.env.JWT_SECRET
 const JWT_EXPIRES = process.env.JWT_EXPIRES ?? '8h'
 
-if (!JWT_SECRET) {
-  throw new Error('JWT_SECRET não definida. Configure a variável de ambiente antes de iniciar o servidor.')
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET
+  if (!secret) {
+    throw new Error(
+      'JWT_SECRET não definida. Configure a variável de ambiente antes de iniciar o servidor.',
+    )
+  }
+  return secret
 }
 
 /**
@@ -30,14 +35,14 @@ export async function login(data: LoginInput): Promise<{ token: string; expiresI
   }
 
   // Atualiza lastLoginAt de forma não-bloqueante
-  prisma.user.update({
-    where: { id: user.id },
-    data: { lastLoginAt: new Date() },
-  }).catch(() => { /* silencioso — não impede o login */ })
+  prisma.user
+    .update({ where: { id: user.id }, data: { lastLoginAt: new Date() } })
+    .catch(() => { /* silencioso — não impede o login */ })
 
+  const secret = getJwtSecret()
   const token = jwt.sign(
     { sub: user.id, username: user.username, role: user.role },
-    JWT_SECRET,
+    secret,
     { expiresIn: JWT_EXPIRES } as jwt.SignOptions,
   )
 
@@ -45,5 +50,5 @@ export async function login(data: LoginInput): Promise<{ token: string; expiresI
 }
 
 export function verifyToken(token: string): jwt.JwtPayload {
-  return jwt.verify(token, JWT_SECRET!) as jwt.JwtPayload
+  return jwt.verify(token, getJwtSecret()) as jwt.JwtPayload
 }
