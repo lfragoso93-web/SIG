@@ -3,7 +3,7 @@
 import { useMemo } from 'react'
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend,
+  PieChart, Pie, Cell,
 } from 'recharts'
 import { LayoutDashboard, TrendingUp, Wallet, HandCoins, BarChart3, AlertCircle, RefreshCw } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
@@ -27,9 +27,7 @@ const ALLOCATION_COLORS = [
 // ---- Skeleton genérico ----
 function Skeleton({ className = '' }: { className?: string }) {
   return (
-    <div
-      className={`bg-[var(--color-surface-3)] rounded animate-pulse ${className}`}
-    />
+    <div className={`bg-[var(--color-surface-3)] rounded animate-pulse ${className}`} />
   )
 }
 
@@ -51,7 +49,7 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
 }
 
 // ---- Tooltip customizado do gráfico de área ----
-function AreaTooltip({ active, payload, label }: any) {
+function AreaTooltip({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string }) {
   if (!active || !payload?.length) return null
   return (
     <div className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-3 py-2 shadow-lg text-xs">
@@ -62,7 +60,7 @@ function AreaTooltip({ active, payload, label }: any) {
 }
 
 // ---- Tooltip customizado do gráfico de pizza ----
-function PieTooltip({ active, payload }: any) {
+function PieTooltip({ active, payload }: { active?: boolean; payload?: { name: string; value: number; payload: { currentPercent: number } }[] }) {
   if (!active || !payload?.length) return null
   const d = payload[0]
   return (
@@ -156,17 +154,12 @@ export default function DashboardPage() {
 
         {/* Gráfico de evolução do patrimônio */}
         <div className="xl:col-span-2 bg-[var(--color-surface-2)] border border-[var(--color-border-subtle)] rounded-xl p-5">
-          <p className="text-sm font-medium mb-5">Evolução do Patrimônio
+          <p className="text-sm font-medium mb-5">
+            Evolução do Patrimônio
             <span className="ml-2 text-xs font-normal text-[var(--color-text-muted)]">últimos 90 dias</span>
           </p>
 
-          {snapshots.isLoading && (
-            <div className="h-52 flex flex-col justify-end gap-1 px-2">
-              {[60, 75, 55, 80, 65, 90, 70].map((h, i) => (
-                <Skeleton key={i} className={`w-full`} style={{ height: `${h}%` } as React.CSSProperties} />
-              ))}
-            </div>
-          )}
+          {snapshots.isLoading && <Skeleton className="h-52 w-full" />}
 
           {snapshots.isError && (
             <ErrorState
@@ -179,7 +172,12 @@ export default function DashboardPage() {
             <div className="h-52 flex flex-col items-center justify-center gap-2 text-[var(--color-text-faint)]">
               <BarChart3 size={28} />
               <p className="text-sm">Nenhum snapshot encontrado.</p>
-              <p className="text-xs">Gere snapshots via <code className="bg-[var(--color-surface-3)] px-1 rounded">POST /portfolio-snapshots/generate</code></p>
+              <p className="text-xs">
+                Gere snapshots via{' '}
+                <code className="bg-[var(--color-surface-3)] px-1 rounded">
+                  POST /portfolio-snapshots/generate
+                </code>
+              </p>
             </div>
           )}
 
@@ -188,7 +186,7 @@ export default function DashboardPage() {
               <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="patrimGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
+                    <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.25} />
                     <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                   </linearGradient>
                 </defs>
@@ -226,7 +224,7 @@ export default function DashboardPage() {
           <p className="text-sm font-medium mb-5">Alocação por Classe</p>
 
           {allocation.isLoading && (
-            <div className="space-y-2">
+            <div className="space-y-3">
               <Skeleton className="h-40 w-40 rounded-full mx-auto" />
               <Skeleton className="h-3 w-32 mx-auto" />
               <Skeleton className="h-3 w-24 mx-auto" />
