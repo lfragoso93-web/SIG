@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ============================================================
-   SIG — Design System
+   SGFP — Design System
    Paleta: Dark moderno (inspirado em Linear/Vercel)
    Primário: Azul-índigo vibrante
    Superfícies: Zinc escuro com hierarquia clara
@@ -25,6 +25,7 @@
   /* --- Primário (Azul-índigo) --- */
   --color-primary:         #6366f1;   /* indigo-500 */
   --color-primary-hover:   #4f46e5;   /* indigo-600 */
+  --color-primary-active:  #4338ca;   /* indigo-700 */
   --color-primary-muted:   #1e1b4b;   /* indigo-950 */
   --color-primary-text:    #e0e7ff;   /* indigo-100 */
 

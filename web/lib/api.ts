@@ -36,6 +36,7 @@ export type ApiError = {
 }
 
 // ---- Tipagens das respostas da API ----
+
 export type PortfolioSnapshot = {
   id: string
   snapshotDate: string
@@ -118,4 +119,10 @@ export type PerformanceData = {
   percentReturn: number
   periodStart: string
   periodEnd: string
+}
+
+export type DividendSummary = {
+  totalReceived: number
+  byPeriod: { period: string; total: number }[]
+  byType: { type: string; total: number }[]
 }
