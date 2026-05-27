@@ -23,36 +23,36 @@ export function useSnapshots(limit = 90) {
   })
 }
 
-// Alocação atual por classe
+// Alocação atual por classe — endpoint: POST /allocation/calculate
 export function useAllocation() {
   return useQuery<AllocationItem[]>({
     queryKey: ['allocation'],
     queryFn: async () => {
-      const res = await api.get<AllocationItem[]>('/allocation')
+      const res = await api.post<AllocationItem[]>('/allocation/calculate')
       return res.data
     },
     staleTime: 5 * 60 * 1000,
   })
 }
 
-// Performance geral da carteira
+// Performance geral da carteira — endpoint: GET /performance/summary
 export function usePerformance() {
   return useQuery<PerformanceData>({
     queryKey: ['performance'],
     queryFn: async () => {
-      const res = await api.get<PerformanceData>('/performance')
+      const res = await api.get<PerformanceData>('/performance/summary')
       return res.data
     },
     staleTime: 5 * 60 * 1000,
   })
 }
 
-// Proventos recebidos
+// Proventos recebidos — endpoint: GET /dividends/summary
 export function useDividends() {
   return useQuery<DividendSummary>({
     queryKey: ['dividends'],
     queryFn: async () => {
-      const res = await api.get<DividendSummary>('/dividends')
+      const res = await api.get<DividendSummary>('/dividends/summary')
       return res.data
     },
     staleTime: 5 * 60 * 1000,
