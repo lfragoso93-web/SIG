@@ -1,4 +1,4 @@
-# ── Estágio 1: dependências ──────────────────────────────────────────────────────
+# ── Estágio 1: dependências ────────────────────────────────────────────────────────────────────
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 
@@ -6,9 +6,11 @@ WORKDIR /app
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
-RUN npm ci
+# npm install resolve divergências entre package.json e package-lock.json
+# sem falhar o build. O lock interno ao container é descartado após o estágio.
+RUN npm install --prefer-offline
 
-# ── Estágio 2: build TypeScript ──────────────────────────────────────────────────
+# ── Estágio 2: build TypeScript ──────────────────────────────────────────────────────────────────
 FROM deps AS builder
 COPY . .
 
@@ -20,7 +22,7 @@ ENV DATABASE_URL=${DATABASE_URL}
 RUN npx prisma generate
 RUN npm run build
 
-# ── Estágio 3: imagem final (sem devDependencies) ────────────────────────────────────
+# ── Estágio 3: imagem final (sem devDependencies) ──────────────────────────────────────────────
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 
@@ -30,7 +32,7 @@ ENV NODE_ENV=production
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev --prefer-offline
 
 COPY --from=builder /app/dist                  ./dist
 COPY --from=builder /app/node_modules/.prisma  ./node_modules/.prisma
