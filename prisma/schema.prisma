@@ -10,6 +10,27 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Usuário do sistema (autenticação).
+/// A senha é armazenada como hash bcrypt — jamais em texto puro.
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique @db.VarChar(80)
+  passwordHash String   @db.VarChar(255)
+  displayName  String?  @db.VarChar(120)
+  role         UserRole @default(ADMIN)
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([username])
+}
+
+enum UserRole {
+  ADMIN
+  VIEWER
+}
+
 /// Tabela de referência para classificação macro dos ativos.
 ///
 /// Códigos esperados em `code` após a migration:

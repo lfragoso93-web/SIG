@@ -1,6 +1,7 @@
 import { PrismaClient, AccountType } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool } from 'pg'
+import bcrypt from 'bcryptjs'
 
 const connectionString = process.env.DATABASE_URL
 
@@ -64,7 +65,44 @@ async function upsertAssetClass(item: {
   })
 }
 
+async function seedAdminUser() {
+  const username    = process.env.INITIAL_ADMIN_USERNAME ?? 'admin'
+  const rawPassword = process.env.INITIAL_ADMIN_PASSWORD
+
+  if (!rawPassword) {
+    console.warn(
+      '[seed] ATENÇÃO: INITIAL_ADMIN_PASSWORD não definida. ' +
+      'O usuário admin não foi criado. ' +
+      'Defina a variável no .env e rode o seed novamente.',
+    )
+    return
+  }
+
+  const existing = await prisma.user.findUnique({ where: { username } })
+  if (existing) {
+    console.log(`[seed] Usuário '${username}' já existe — pulando criação.`)
+    return
+  }
+
+  const passwordHash = await bcrypt.hash(rawPassword, 12)
+  await prisma.user.create({
+    data: {
+      username,
+      passwordHash,
+      displayName: 'Administrador',
+      role: 'ADMIN',
+      isActive: true,
+    },
+  })
+
+  console.log(`[seed] Usuário '${username}' criado com sucesso.`)
+}
+
 async function main() {
+  // ── 1. Usuário admin ─────────────────────────────────────────────────────
+  await seedAdminUser()
+
+  // ── 2. Migração de códigos legados de AssetClass ─────────────────────────
   const legacyCodeMap: Record<string, string> = {
     AÇÕES: 'DOMESTIC_STOCK',
     FIIS: 'FII',
@@ -87,6 +125,7 @@ async function main() {
     }
   }
 
+  // ── 3. Classes de ativos ──────────────────────────────────────────────────
   const classes = [
     {
       code: 'DOMESTIC_STOCK',
@@ -154,6 +193,7 @@ async function main() {
     await upsertAssetClass(item)
   }
 
+  // ── 4. Instituições ───────────────────────────────────────────────────────
   const institutions = [
     { name: 'NuInvest' },
     { name: 'XP Investimentos' },
@@ -169,6 +209,7 @@ async function main() {
     })
   }
 
+  // ── 5. Contas ─────────────────────────────────────────────────────────────
   const [nuinvest, xp, bb, caixa, fixedIncomeClass, cashClass] = await Promise.all([
     prisma.institution.findUnique({ where: { name: 'NuInvest' } }),
     prisma.institution.findUnique({ where: { name: 'XP Investimentos' } }),
@@ -208,6 +249,7 @@ async function main() {
     })
   }
 
+  // ── 6. Metas de alocação ──────────────────────────────────────────────────
   if (fixedIncomeClass) {
     await prisma.allocationTarget.upsert({
       where: {
@@ -216,10 +258,7 @@ async function main() {
           effectiveFrom: new Date('2026-01-01'),
         },
       },
-      update: {
-        targetPercentage: 0.35,
-        effectiveTo: null,
-      },
+      update: { targetPercentage: 0.35, effectiveTo: null },
       create: {
         assetClassId: fixedIncomeClass.id,
         targetPercentage: 0.35,
@@ -237,10 +276,7 @@ async function main() {
           effectiveFrom: new Date('2026-01-01'),
         },
       },
-      update: {
-        targetPercentage: 0.05,
-        effectiveTo: null,
-      },
+      update: { targetPercentage: 0.05, effectiveTo: null },
       create: {
         assetClassId: cashClass.id,
         targetPercentage: 0.05,
