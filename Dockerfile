@@ -1,4 +1,4 @@
-# ── Estágio 1: dependências ──────────────────────────────────────────
+# ── Estágio 1: dependências ──────────────────────────────────────────────────────
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 
@@ -8,7 +8,7 @@ RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists
 COPY package*.json ./
 RUN npm ci
 
-# ── Estágio 2: build TypeScript ──────────────────────────────────────
+# ── Estágio 2: build TypeScript ──────────────────────────────────────────────────
 FROM deps AS builder
 COPY . .
 
@@ -20,7 +20,7 @@ ENV DATABASE_URL=${DATABASE_URL}
 RUN npx prisma generate
 RUN npm run build
 
-# ── Estágio 3: imagem final (sem devDependencies) ────────────────────
+# ── Estágio 3: imagem final (sem devDependencies) ────────────────────────────────────
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 
@@ -32,11 +32,12 @@ RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-COPY --from=builder /app/dist              ./dist
+COPY --from=builder /app/dist                  ./dist
 COPY --from=builder /app/node_modules/.prisma  ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma  ./node_modules/@prisma
-COPY prisma/schema.prisma                  ./prisma/schema.prisma
-COPY prisma.config.ts                      ./prisma.config.ts
+# schema + migrations necessários para o `prisma migrate deploy` no CMD
+COPY --from=builder /app/prisma                ./prisma
+COPY prisma.config.ts                          ./prisma.config.ts
 
 EXPOSE 3001
 
