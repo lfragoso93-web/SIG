@@ -6,7 +6,7 @@ export function usePortfolioItems() {
   return useQuery<PortfolioItem[]>({
     queryKey: ['portfolio-items'],
     queryFn:  () => api.get('/portfolio-items').then(r => r.data),
-    staleTime: 1000 * 60 * 5, // 5 min
+    staleTime: 1000 * 60 * 5,
   })
 }
 
@@ -18,18 +18,19 @@ export function useSnapshots(period: 'DAILY' | 'WEEKLY' | 'MONTHLY' = 'DAILY') {
   })
 }
 
+// Nota: usa POST /allocation/calculate (mesmo endpoint do useDashboard)
 export function useAllocation() {
   return useQuery<AllocationItem[]>({
-    queryKey: ['allocation'],
-    queryFn:  () => api.get('/allocation').then(r => r.data),
+    queryKey: ['portfolio-allocation'],
+    queryFn:  () => api.post('/allocation/calculate').then(r => r.data),
     staleTime: 1000 * 60 * 5,
   })
 }
 
 export function usePerformance() {
   return useQuery<PerformanceData>({
-    queryKey: ['performance'],
-    queryFn:  () => api.get('/performance').then(r => r.data),
+    queryKey: ['portfolio-performance'],
+    queryFn:  () => api.get('/performance/summary').then(r => r.data),
     staleTime: 1000 * 60 * 5,
   })
 }
