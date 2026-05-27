@@ -62,8 +62,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <TrendingUp size={14} className="text-white" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-semibold leading-none">SIG</p>
-          <p className="text-[10px] text-[var(--color-text-faint)] mt-0.5">Investimentos</p>
+          <p className="text-sm font-semibold leading-none">SGFP</p>
+          <p className="text-[10px] text-[var(--color-text-faint)] mt-0.5">Gestão Financeira</p>
         </div>
       </div>
 
@@ -108,7 +108,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <div className="w-7 h-7 rounded-md bg-[var(--color-primary)] flex items-center justify-center">
               <TrendingUp size={14} className="text-white" />
             </div>
-            <span className="text-sm font-semibold">SIG</span>
+            <span className="text-sm font-semibold">SGFP</span>
           </div>
           <button onClick={() => setOpen(false)} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
             <X size={18} />
@@ -132,7 +132,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <div className="w-6 h-6 rounded bg-[var(--color-primary)] flex items-center justify-center">
               <TrendingUp size={12} className="text-white" />
             </div>
-            <span className="text-sm font-semibold">SIG</span>
+            <span className="text-sm font-semibold">SGFP</span>
           </div>
         </header>
 

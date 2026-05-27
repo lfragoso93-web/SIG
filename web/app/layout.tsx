@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'SIG — Sistema de Investimentos e Gestão',
+  title: 'SGFP — Sistema de Gestão de Finanças Pessoais',
   description: 'Controle e acompanhamento da sua carteira de investimentos',
 }
 

@@ -43,8 +43,8 @@ export default function LoginPage() {
             <TrendingUp size={18} className="text-white" />
           </div>
           <div>
-            <p className="text-[11px] font-medium tracking-widest text-[var(--color-text-muted)] uppercase">Sistema de Investimentos</p>
-            <p className="text-lg font-semibold leading-none">SIG</p>
+            <p className="text-[11px] font-medium tracking-widest text-[var(--color-text-muted)] uppercase">Sistema de Gestão Financeira</p>
+            <p className="text-lg font-semibold leading-none">SGFP</p>
           </div>
         </div>
 
@@ -104,7 +104,7 @@ export default function LoginPage() {
         </div>
 
         <p className="mt-6 text-center text-xs text-[var(--color-text-faint)]">
-          SIG v0.1.0 — uso interno
+          SGFP v0.3.0 — uso interno
         </p>
       </div>
     </div>
