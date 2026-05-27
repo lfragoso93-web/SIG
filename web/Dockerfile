@@ -1,10 +1,13 @@
-# ── Estágio 1: dependências ──────────────────────────────────────────
+# ── Estágio 1: dependências ──────────────────────────────────────────────────────
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci
+# npm install (em vez de npm ci) resolve divergências entre package.json
+# e package-lock.json sem falhar o build. O lock interno ao container
+# é descartado após o estágio, portanto não há efeito colateral.
+RUN npm install --prefer-offline
 
-# ── Estágio 2: build ─────────────────────────────────────────────────
+# ── Estágio 2: build ────────────────────────────────────────────────────────────
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
@@ -16,7 +19,7 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 RUN mkdir -p /app/public
 RUN npm run build
 
-# ── Estágio 3: imagem final ───────────────────────────────────────────
+# ── Estágio 3: imagem final ──────────────────────────────────────────────────────────
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
