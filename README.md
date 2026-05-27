@@ -45,8 +45,9 @@ sgfp/
 │   │   └── (dashboard)/  # Layout + páginas do painel
 │   ├── lib/
 │   │   ├── api.ts        # Cliente Axios com interceptors JWT / 401
-│   │   └── auth.ts       # authService (login, logout, token)
-│   └── components/       # Componentes reutilizáveis
+│   │   ├── auth.ts       # authService (login, logout, token)
+│   │   └── hooks/        # useDashboard, usePortfolio, useTreasury, useFixedIncome
+│   └── components/       # Componentes reutilizáveis (KpiCard, skeletons, etc.)
 └── docker-compose.yml    # Orquestração: db + api + web
 ```
 
@@ -68,7 +69,7 @@ APP_DB_USER=sgfp_user
 APP_DB_PASSWORD=senha_segura
 DB_PORT=5432
 
-# API
+# API (NestJS — roda na porta 3000)
 PORT=3000
 NODE_ENV=development
 JWT_SECRET=sua-chave-secreta-longa
@@ -79,11 +80,12 @@ API_PORT=3000
 INITIAL_ADMIN_USERNAME=admin
 INITIAL_ADMIN_PASSWORD=SuaSenhaForte123
 
-# CORS — origem do frontend (browser)
+# CORS — origem do browser (deve ser localhost, não o nome do container)
 CORS_ORIGIN=http://localhost:3001
 
-# Frontend
-NEXT_PUBLIC_API_URL=http://localhost:3000
+# Frontend (Next.js — roda na porta 3001)
+# NEXT_PUBLIC_API_URL é embutida no build; requer rebuild após mudança
+NEXT_PUBLIC_API_URL=http://localhost:3001/api
 INTERNAL_API_URL=http://api:3000
 WEB_PORT=3001
 
@@ -96,6 +98,7 @@ DOCKER_NETWORK_NAME=sgfp_network
 
 > ⚠️ `NEXT_PUBLIC_API_URL` é incorporada **no build** do Next.js. Mudanças exigem `docker compose build web`.
 > ⚠️ Sem `INITIAL_ADMIN_PASSWORD` definida, o seed não cria o usuário admin.
+> ⚠️ **Não confunda as portas:** Next.js = 3000 (interno), exposto na 3001; NestJS/API = 3001 (interno), exposto na 3000. Veja `docker-compose.yml` para os mapeamentos exatos.
 
 ### 2. Suba os containers
 
@@ -203,6 +206,15 @@ Todos os endpoints (exceto `/auth/*` e `/health`) exigem:
 Authorization: Bearer <token>
 ```
 
+### Endpoints críticos da Dashboard
+
+| Endpoint | Método | Descrição |
+|---|---|---|
+| `/portfolio-snapshots` | GET | Snapshots do portfólio (params: `period`, `limit`, `orderBy`, `order`) |
+| `/allocation/calculate` | POST | Calcula alocação atual por classe |
+| `/performance/summary` | GET | Rentabilidade geral da carteira |
+| `/dividends/summary` | GET | Resumo total de proventos recebidos |
+
 ---
 
 ## Jobs Automáticos (Crons)
@@ -279,10 +291,13 @@ npx prisma generate
 |---|---|
 | Next.js | 15 — App Router |
 | Tailwind CSS | v4 |
+| React Query | `@tanstack/react-query` — cache e refetch automático |
+| Recharts | Gráficos (AreaChart, PieChart) |
 | React Hook Form | Validação de formulários |
 | Zod | Schema de validação |
 | Axios | Cliente HTTP com interceptors |
 | Lucide React | Ícones |
+| date-fns | Formatação de datas com locale pt-BR |
 
 ### Design System
 
@@ -294,12 +309,29 @@ O frontend usa um design system próprio definido em `web/app/globals.css`:
 - **Tokens CSS**: superfícies, texto, semânticas (success/warning/error), espaçamentos, raios e sombras
 - **Utilitários financeiros**: `.positive`, `.negative`, `.neutral`, `.tabular-nums`
 
+> ⚠️ Tokens `--color-surface-3`, `--color-primary-active` e `--color-error-muted` estão referenciados no código mas ainda não definidos em `globals.css`. Pendente de correção.
+
+### Hooks de dados
+
+| Hook | Arquivo | Endpoints chamados |
+|---|---|---|
+| `useSnapshots(limit)` | `useDashboard.ts` | `GET /portfolio-snapshots` |
+| `useAllocation()` | `useDashboard.ts` | `POST /allocation/calculate` |
+| `usePerformance()` | `useDashboard.ts` | `GET /performance/summary` |
+| `useDividends()` | `useDashboard.ts` | `GET /dividends/summary` |
+| `usePortfolioItems()` | `usePortfolio.ts` | `GET /portfolio-items` |
+| `useSnapshots(period)` | `usePortfolio.ts` | `GET /portfolio-snapshots` |
+| `useAllocation()` | `usePortfolio.ts` | `POST /allocation/calculate` |
+| `usePerformance()` | `usePortfolio.ts` | `GET /performance/summary` |
+
+> ⚠️ Os hooks `useAllocation` e `usePerformance` existem em **dois arquivos** (`useDashboard.ts` e `usePortfolio.ts`). Eles usam `queryKey`s diferentes (`allocation` vs. `portfolio-allocation`) para evitar colisão de cache no React Query.
+
 ### Rotas
 
 | Rota | Status | Descrição |
 |---|---|---|
 | `/login` | ✅ Implementado | Tela de login com validação |
-| `/` | 🔨 Em desenvolvimento | Dashboard — KPIs, gráficos, visão geral |
+| `/` | ✅ Implementado | Dashboard — KPIs, gráfico de evolução e gráfico de alocação |
 | `/portfolio` | 🔲 Planejado | Posições, P&L, preço médio por ativo |
 | `/treasury` | 🔲 Planejado | Tesouro Direto — títulos, P&L líquido |
 | `/fixed-income` | 🔲 Planejado | Renda Fixa — accrual, isenção, vencimento |
@@ -346,6 +378,30 @@ has been blocked by CORS policy: The 'Access-Control-Allow-Origin' header has a 
 **Solução:** Alterar `CORS_ORIGIN` no `.env` para `http://localhost:3001` (a origem que o browser realmente envia) e recriar o container da API.
 
 > ℹ️ `http://web:3001` é válido para comunicação container-a-container (SSR do Next.js). Para requisições do browser, use `http://localhost:3001`.
+
+### baseURL do Axios apontando para porta errada
+
+**Sintoma:** Todos os endpoints da dashboard (allocation, performance, dividends, snapshots) retornavam erro. As requisições chegavam ao próprio Next.js em vez da API NestJS.
+
+**Causa:** O valor default de `API_URL` em `web/lib/api.ts` estava como `http://localhost:3000` — a porta do Next.js. A API NestJS fica na porta `3001` localmente. Sem a variável `NEXT_PUBLIC_API_URL` definida no `.env`, o Axios apontava para o lugar errado.
+
+**Solução:** Corrigir o fallback em `api.ts` e o `.env.example`:
+```ts
+// antes
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'
+// depois
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
+```
+
+### queryKeys conflitantes entre useDashboard e usePortfolio
+
+**Sintoma:** Navegar entre a dashboard e a página de portfólio causava dados incorretos sendo exibidos (cache cruzado entre hooks).
+
+**Causa:** `useAllocation()` e `usePerformance()` em `usePortfolio.ts` usavam as mesmas `queryKey`s (`['allocation']`, `['performance']`) que os hooks equivalentes em `useDashboard.ts`. Além disso, `useAllocation` em `usePortfolio.ts` chamava `GET /allocation` (inexistente) em vez de `POST /allocation/calculate`, e `usePerformance` chamava `GET /performance` em vez de `GET /performance/summary`.
+
+**Solução:**
+- `useAllocation` em `usePortfolio.ts`: endpoint `GET /allocation` → `POST /allocation/calculate`; queryKey `['allocation']` → `['portfolio-allocation']`
+- `usePerformance` em `usePortfolio.ts`: endpoint `GET /performance` → `GET /performance/summary`; queryKey `['performance']` → `['portfolio-performance']`
 
 ---
 
@@ -403,15 +459,15 @@ has been blocked by CORS policy: The 'Access-Control-Allow-Origin' header has a 
 - [x] Layout do dashboard com sidebar responsiva (desktop + drawer mobile)
 - [x] Cliente Axios com interceptors JWT e redirect em 401
 - [x] Middleware Next.js para proteção de rotas
+- [x] **Dashboard — página principal** com KPIs reais, gráfico de evolução do patrimônio (90 dias) e gráfico de alocação por classe, skeleton loaders e estados de erro/empty
+- [x] Hooks de dados com React Query (`useDashboard`, `usePortfolio`, `useTreasury`, `useFixedIncome`)
+- [x] **Correção da baseURL do Axios** — fallback de `3000` → `3001` (`web/lib/api.ts`)
+- [x] **Correção dos endpoints em `usePortfolio.ts`** — `/allocation` → `POST /allocation/calculate`; `/performance` → `GET /performance/summary`
+- [x] **Correção de queryKeys** em `usePortfolio.ts` para evitar colisão de cache com `useDashboard.ts`
 
 ### 🔴 Alta Prioridade — Em andamento
 
 - [ ] **Renomear projeto de SIG para SGFP** — ver checklist abaixo
-- [ ] **Dashboard — KPIs reais**
-  - Cards: patrimônio total, rentabilidade, proventos recebidos, rendimento líquido
-  - Gráfico de evolução do patrimônio (snapshots DAILY)
-  - Gráfico de alocação por classe vs. meta
-  - Skeleton loaders e estados de erro
 - [ ] **Corrigir tokens CSS inconsistentes** — `--color-surface-3`, `--color-primary-active`, `--color-error-muted` referenciados no código mas não definidos em `globals.css`
 - [ ] **Tesouro Direto — import histórico via CSV** (Tesouro Transparente)
 
@@ -482,4 +538,4 @@ git push origin feat/nome-da-feature
 
 ---
 
-*SGFP v0.2.0 — uso pessoal*
+*SGFP v0.3.0 — uso pessoal*
