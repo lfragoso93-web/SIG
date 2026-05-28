@@ -1,6 +1,6 @@
 import { Request, Response } from 'express'
 import { AssetsService } from './assets.service'
-import { fetchYahooQuote, inferAssetClass } from '../../providers/yahoo/yahoo.client'
+import { fetchQuote, inferAssetClass } from '../../providers/yahoo/quote.provider'
 
 const assetsService = new AssetsService()
 
@@ -17,13 +17,13 @@ export class AssetsController {
 
   /**
    * GET /assets/quote/:ticker
-   * Proxy servidor → Yahoo Finance (evita CORS no browser).
-   * Retorna { name, inferredClass } ou { name: null, inferredClass: null } quando não encontrado.
+   * Proxy servidor → Brapi (principal) + Yahoo Finance (fallback).
+   * Retorna { name, inferredClass } ou { name: null, inferredClass: null }.
    */
   async quoteByTicker(req: Request, res: Response) {
     try {
       const ticker = String(req.params.ticker).trim().toUpperCase()
-      const quote  = await fetchYahooQuote(ticker)
+      const quote  = await fetchQuote(ticker)
 
       if (!quote) {
         return res.status(200).json({ name: null, inferredClass: null })
@@ -34,10 +34,9 @@ export class AssetsController {
       return res.status(200).json({
         name:          quote.longname || quote.shortname || null,
         inferredClass,
-        // Campos extras opcionais — o frontend pode ignorar
-        symbol:   quote.symbol,
-        quoteType: quote.quoteType,
-        exchDisp:  quote.exchDisp,
+        symbol:        quote.symbol,
+        quoteType:     quote.quoteType,
+        exchDisp:      quote.exchDisp,
       })
     } catch (error) {
       console.error('Erro ao buscar quote:', error)
