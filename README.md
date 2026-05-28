@@ -18,8 +18,8 @@ Plataforma pessoal de gestão financeira com foco em investimentos. Permite cada
 | Autenticação | JWT (Bearer token) — usuário criado via seed |
 | Validação (API) | Zod |
 | Agendamento | node-cron |
-| Cotações B3 | BRAPI (ações, FIIs, ETFs, BDRs) |
-| Cotações internacionais | Yahoo Finance |
+| Cotações B3 | **BRAPI** (principal — ações, FIIs, ETFs, BDRs) |
+| Cotações fallback | **Yahoo Finance** (secundário — consultado se Brapi não retornar) |
 | Cotações Tesouro Direto | radaropcoes.com (pública, sem auth) |
 | Taxas macro (CDI/SELIC/IPCA) | BRAPI |
 | Containerização | Docker Compose |
@@ -33,7 +33,11 @@ sgfp/
 ├── src/                  # API NestJS
 │   ├── modules/          # Módulos de domínio (auth, assets, portfolio, treasury, fixed-income…)
 │   ├── jobs/             # Crons automáticos (preços, proventos, snapshots, accrual)
-│   ├── providers/        # Integrações externas (BRAPI, Yahoo Finance, radaropcoes)
+│   ├── providers/        # Integrações externas
+│   │   ├── brapi/        # BRAPI — cotações B3 e taxas macro
+│   │   └── yahoo/
+│   │       ├── quote.provider.ts   # Estratégia: Brapi primário → Yahoo fallback
+│   │       └── yahoo.client.ts     # Cliente HTTP Yahoo Finance (mantido para retrocompat.)
 │   └── shared/           # Middlewares, erros, utilitários
 ├── prisma/
 │   ├── schema.prisma     # Schema completo do banco
@@ -47,7 +51,9 @@ sgfp/
 │   │   ├── api.ts        # Cliente Axios com interceptors JWT / 401
 │   │   ├── auth.ts       # authService (login, logout, token)
 │   │   └── hooks/        # useDashboard, usePortfolio, useTreasury, useFixedIncome
-│   └── components/       # Componentes reutilizáveis (KpiCard, skeletons, etc.)
+│   └── components/
+│       └── transactions/
+│           └── NewTransactionDrawer.tsx  # Drawer de novo lançamento (wizard 4 passos)
 └── docker-compose.yml    # Orquestração: db + api + web
 ```
 
@@ -180,6 +186,36 @@ curl -X POST http://localhost:3000/auth/login \
 
 ---
 
+## Estratégia de Cotações — Brapi + Yahoo Finance
+
+Todas as buscas de cotação passam por `src/providers/yahoo/quote.provider.ts`, que implementa uma estratégia em dois estágios:
+
+```
+Ticker (ex: PETR4)
+       │
+       ▼
+   1. BRAPI  ──────────────► resultado? ──► retorna
+       │ (falhou / sem dado)
+       ▼
+   2. Yahoo Finance
+       │ a) tenta ticker puro (PETR4)
+       │ b) se não achar, tenta com .SA (PETR4.SA)
+       └──────────────────────────────────────────► retorna ou null
+```
+
+**Por que Brapi como primário:**
+- A Brapi conhece tickers B3 nativamente (`PETR4`, `MXRF11`, `BOVA11`) — sem necessidade de sufixo `.SA`
+- Resposta consistente para ações, FIIs, ETFs e BDRs listados na B3
+- Mesma fonte já usada para importação de preços e taxas macro (CDI/SELIC/IPCA)
+
+**Por que Yahoo como fallback:**
+- Cobre ativos internacionais (`AAPL`, `MSFT`) que a Brapi não indexa
+- Cobre casos excepcionais de tickers B3 obscuros que a Brapi eventualmente não retorna
+
+**Retrocompatibilidade:** `fetchYahooQuote` é mantido como alias de `fetchQuote` no `quote.provider.ts` — nenhum módulo existente precisou ser alterado além do `assets.controller.ts` (import atualizado).
+
+---
+
 ## Estrutura da API
 
 ### Módulos
@@ -245,6 +281,32 @@ docker compose exec api node -e "const { importTreasuryPrices } = require('./dis
 # Rodar accrual de renda fixa
 docker compose exec api node -e "const { runFixedIncomeAccrual } = require('./dist/jobs/fixed-income-accrual.cron'); runFixedIncomeAccrual().then(r => console.log(JSON.stringify(r, null, 2)))"
 ```
+
+### Gerar snapshots DAILY retroativos (últimos 90 dias)
+
+Caso o gráfico de evolução da dashboard apareça vazio, é necessário popular os snapshots DAILY históricos:
+
+```powershell
+$headers = @{ Authorization = "Bearer SEU_TOKEN_AQUI" }
+
+$today = Get-Date
+for ($i = 90; $i -ge 0; $i--) {
+    $date = $today.AddDays(-$i).ToString("yyyy-MM-dd")
+    try {
+        Invoke-RestMethod -Method Post `
+          -Uri "http://localhost:3000/portfolio-snapshots/generate" `
+          -Headers $headers `
+          -ContentType "application/json" `
+          -Body ('{"referenceDate":"' + $date + '","period":"DAILY"}')
+        Write-Host "OK: $date"
+    } catch {
+        Write-Host "SKIP: $date - $($_.Exception.Message)"
+    }
+    Start-Sleep -Milliseconds 150
+}
+```
+
+> ℹ️ Datas sem preço de mercado disponível (fins de semana / feriados) retornarão `SKIP` — comportamento esperado.
 
 ---
 
@@ -334,7 +396,7 @@ O frontend usa um design system próprio definido em `web/app/globals.css`:
 | `/` | ✅ Implementado | Dashboard — KPIs, gráfico de evolução e gráfico de alocação |
 | `/portfolio` | 🔲 Planejado | Posições, P&L, preço médio por ativo |
 | `/treasury` | 🔲 Planejado | Tesouro Direto — títulos, P&L líquido |
-| `/fixed-income` | 🔲 Planejado | Renda Fixa — accrual, isenção, vencimento |
+| `/fixed-income` | 🔲 Planejado | Renda Fixa — accrual, isenção, status de vencimento |
 | `/transactions` | 🔲 Planejado | Histórico de transações |
 | `/allocation` | 🔲 Planejado | Alocação por classe vs. meta (gráfico) |
 
@@ -403,6 +465,47 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 - `useAllocation` em `usePortfolio.ts`: endpoint `GET /allocation` → `POST /allocation/calculate`; queryKey `['allocation']` → `['portfolio-allocation']`
 - `usePerformance` em `usePortfolio.ts`: endpoint `GET /performance` → `GET /performance/summary`; queryKey `['performance']` → `['portfolio-performance']`
 
+### Gráficos da dashboard em empty state (snapshots DAILY fora do intervalo)
+
+**Sintoma:** O gráfico de evolução do patrimônio (90 dias) aparecia vazio mesmo com dados no banco.
+
+**Causa:** Os snapshots `DAILY` existentes foram gerados pelo seed com dados históricos de 2024. O `useSnapshots(90)` busca os últimos 90 dias a partir de hoje, e nenhum snapshot caia nesse intervalo.
+
+**Solução:** Executar o script PowerShell de geração retroativa (ver seção *Jobs Automáticos → Gerar snapshots DAILY retroativos*) para popular os últimos 90 dias com dados reais da carteira atual.
+
+### Cotações exigindo sufixo `.SA` desnecessariamente
+
+**Sintoma:** Ao cadastrar um ativo B3 (ex: `PETR4`), o sistema buscava `PETR4.SA` no Yahoo Finance — um sufixo que não existe na realidade e confundia o fluxo de cadastro.
+
+**Causa:** O `yahoo.client.ts` era a única fonte de cotações e o Yahoo Finance exige o sufixo `.SA` para tickers da B3. Isso tornava o ticker exibido ao usuário inconsistente com o ticker real da bolsa.
+
+**Solução:** Criação de `src/providers/yahoo/quote.provider.ts` com estratégia em dois estágios: **Brapi como primário** (conhece tickers B3 nativamente, sem `.SA`) e **Yahoo Finance como fallback** (para ativos internacionais e casos excepcionais). O Yahoo ainda tenta `.SA` internamente como segunda tentativa, mas isso é transparente para o usuário.
+
+### SyntaxError no SWC — mistura de `||` com `??` sem parênteses
+
+**Sintoma:** Build do Docker falhava com:
+```
+Error: Nullish coalescing operator(??) requires parens when mixing with logical operators
+./components/transactions/NewTransactionDrawer.tsx
+```
+
+**Causa:** O SWC (compilador do Next.js 15) rejeita expressões que misturam `||` e `??` na mesma linha sem parênteses explícitos — regra de precedência de operadores herdada da especificação ECMAScript.
+
+```ts
+// ❌ inválido para o SWC
+const resolvedClassName = inferredClassName ||
+  (assetClasses.data ?? []).find(...)?.name ?? ''
+```
+
+**Solução:** Extrair a subexpressão com `??` para uma variável separada, eliminando a mistura:
+```ts
+// ✅ correto
+const fallbackClassName = (assetClasses.data ?? []).find(
+  (c: AssetClass) => c.id === fallbackClassId,
+)?.name ?? ''
+const resolvedClassName = inferredClassName || fallbackClassName
+```
+
 ---
 
 ## Lógica Financeira
@@ -450,6 +553,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 - [x] Módulo Renda Fixa Privada — accrual por indexador, IR/IOF, isenção automática, resgate com P&L
 - [x] Cron de accrual de Renda Fixa (diário, taxas reais via BRAPI)
 - [x] Autenticação JWT com usuário criado via seed
+- [x] **`quote.provider.ts`** — estratégia Brapi primário / Yahoo Finance fallback (sem `.SA` obrigatório)
 
 ### ✅ Concluído — Frontend
 
@@ -461,9 +565,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 - [x] Middleware Next.js para proteção de rotas
 - [x] **Dashboard — página principal** com KPIs reais, gráfico de evolução do patrimônio (90 dias) e gráfico de alocação por classe, skeleton loaders e estados de erro/empty
 - [x] Hooks de dados com React Query (`useDashboard`, `usePortfolio`, `useTreasury`, `useFixedIncome`)
+- [x] **`NewTransactionDrawer`** — wizard 4 passos (tipo → ativo → detalhes → confirmar) com busca via Brapi/Yahoo, inferência de classe, cadastro automático de novo ativo
 - [x] **Correção da baseURL do Axios** — fallback de `3000` → `3001` (`web/lib/api.ts`)
 - [x] **Correção dos endpoints em `usePortfolio.ts`** — `/allocation` → `POST /allocation/calculate`; `/performance` → `GET /performance/summary`
 - [x] **Correção de queryKeys** em `usePortfolio.ts` para evitar colisão de cache com `useDashboard.ts`
+- [x] **Fix SWC build** — extração de variável em `NewTransactionDrawer.tsx` para resolver erro de precedência `||` vs `??`
 
 ### 🔴 Alta Prioridade — Em andamento
 
@@ -538,4 +644,4 @@ git push origin feat/nome-da-feature
 
 ---
 
-*SGFP v0.3.0 — uso pessoal*
+*SGFP v0.3.1 — uso pessoal*
