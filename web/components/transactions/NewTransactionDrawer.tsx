@@ -99,8 +99,11 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   const resolvedClassId  = inferredClassId || fallbackClassId
 
   // assetType derivado da classe inferida (ou fallback pelo select manual)
-  const resolvedClassName = inferredClassName ||
-    (assetClasses.data ?? []).find((c: AssetClass) => c.id === fallbackClassId)?.name ?? ''
+  // Parênteses obrigatórios ao misturar || com ?? (regra SWC/ESLint)
+  const fallbackClassName = (assetClasses.data ?? []).find(
+    (c: AssetClass) => c.id === fallbackClassId,
+  )?.name ?? ''
+  const resolvedClassName = inferredClassName || fallbackClassName
   const inferredAssetType = CLASS_NAME_TO_ASSET_TYPE[resolvedClassName] ?? 'STOCK'
 
   // Reset ao fechar
