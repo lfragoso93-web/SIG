@@ -4,10 +4,11 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   TrendingUp, LayoutDashboard, Briefcase, Building2,
-  PiggyBank, ArrowLeftRight, PieChart, LogOut, Menu, X,
+  PiggyBank, ArrowLeftRight, PieChart, LogOut, Menu, X, Plus,
 } from 'lucide-react'
 import { useState } from 'react'
 import { authService } from '@/lib/auth'
+import { NewTransactionDrawer } from '@/components/transactions/NewTransactionDrawer'
 
 const NAV = [
   { href: '/',               label: 'Dashboard',     icon: LayoutDashboard },
@@ -21,7 +22,8 @@ const NAV = [
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname    = usePathname()
   const router      = useRouter()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen]         = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
 
   const handleLogout = () => {
     authService.logout()
@@ -141,6 +143,30 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {children}
         </main>
       </div>
+
+      {/* Botão + flutuante global */}
+      <button
+        onClick={() => setDrawerOpen(true)}
+        aria-label="Novo lançamento"
+        className="
+          fixed bottom-6 right-6 z-30
+          w-13 h-13 rounded-full
+          bg-[var(--color-primary)] text-white
+          shadow-lg hover:bg-[var(--color-primary-hover)]
+          flex items-center justify-center
+          transition-all duration-200 hover:scale-105 active:scale-95
+          focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:ring-offset-2
+        "
+        style={{ width: 52, height: 52 }}
+      >
+        <Plus size={22} strokeWidth={2.5} />
+      </button>
+
+      {/* Drawer de novo lançamento */}
+      <NewTransactionDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+      />
     </div>
   )
 }
