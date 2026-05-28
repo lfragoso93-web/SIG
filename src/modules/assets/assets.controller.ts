@@ -1,5 +1,6 @@
 import { Request, Response } from 'express'
 import { AssetsService } from './assets.service'
+import { fetchYahooQuote, inferAssetClass } from '../../providers/yahoo/yahoo.client'
 
 const assetsService = new AssetsService()
 
@@ -11,6 +12,36 @@ export class AssetsController {
     } catch (error) {
       console.error('Erro ao listar ativos:', error)
       return res.status(500).json({ message: 'Erro interno ao listar ativos.' })
+    }
+  }
+
+  /**
+   * GET /assets/quote/:ticker
+   * Proxy servidor → Yahoo Finance (evita CORS no browser).
+   * Retorna { name, inferredClass } ou { name: null, inferredClass: null } quando não encontrado.
+   */
+  async quoteByTicker(req: Request, res: Response) {
+    try {
+      const ticker = String(req.params.ticker).trim().toUpperCase()
+      const quote  = await fetchYahooQuote(ticker)
+
+      if (!quote) {
+        return res.status(200).json({ name: null, inferredClass: null })
+      }
+
+      const inferredClass = inferAssetClass(quote)
+
+      return res.status(200).json({
+        name:          quote.longname || quote.shortname || null,
+        inferredClass,
+        // Campos extras opcionais — o frontend pode ignorar
+        symbol:   quote.symbol,
+        quoteType: quote.quoteType,
+        exchDisp:  quote.exchDisp,
+      })
+    } catch (error) {
+      console.error('Erro ao buscar quote:', error)
+      return res.status(500).json({ message: 'Erro interno ao buscar cotação.' })
     }
   }
 
@@ -49,14 +80,12 @@ export class AssetsController {
         indexer,
       } = req.body
 
-      // Campos sempre obrigatórios
       if (!name || !assetClassId || !assetType) {
         return res.status(400).json({
           message: 'Os campos name, assetClassId e assetType são obrigatórios.',
         })
       }
 
-      // Para ativos que não são Tesouro Direto, ticker é obrigatório
       const isTesouro =
         String(assetType).toUpperCase() === 'BOND' &&
         String(issuer ?? '').trim() === 'Tesouro Nacional'
@@ -67,7 +96,6 @@ export class AssetsController {
         })
       }
 
-      // Para Tesouro Direto, indexer e maturityDate são obrigatórios
       if (isTesouro && (!indexer || !maturityDate)) {
         return res.status(400).json({
           message:
