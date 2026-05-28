@@ -23,28 +23,40 @@ interface Props {
   onClose: () => void
 }
 
-// Mapeia tipo brapi → assetType do nosso schema
-function inferAssetType(quote: BrapiQuote | null, ticker: string): string {
-  if (!quote) return 'STOCK'
-  const name = (quote.longName ?? quote.shortName ?? '').toLowerCase()
-  const t = (quote.type ?? '').toUpperCase()
-  const tk = ticker.toUpperCase()
+// ── Inferência automática ──────────────────────────────────────────────────
 
-  if (t === 'ETF' || name.includes('etf')) return 'ETF'
-  if (t === 'FII' || name.includes('fundo imobili')) return 'FII'
+/** AssetType (enum Prisma) inferido pelo ticker + dados brapi */
+function inferAssetType(quote: BrapiQuote | null, ticker: string): string {
+  const tk   = ticker.toUpperCase()
+  const name = ((quote?.longName ?? quote?.shortName) || '').toLowerCase()
+  const type = (quote?.type ?? '').toUpperCase()
+
+  if (type === 'ETF' || name.includes(' etf')) return 'ETF'
+  if (type === 'FII' || name.includes('fundo imobili'))  return 'FII'
   if (tk.endsWith('34') || tk.endsWith('35') || name.includes('bdr')) return 'BDR'
-  if (name.includes('tesouro')) return 'BOND'
+  if (name.includes('tesouro') || name.includes('ntnb') || name.includes('lft')) return 'BOND'
+  if (type === 'STOCK' || tk.match(/^[A-Z]{4}\d{1,2}$/)) return 'STOCK'
   return 'STOCK'
 }
 
-const ASSET_TYPES = [
-  { value: 'STOCK', label: 'Ação' },
-  { value: 'ETF',   label: 'ETF'  },
-  { value: 'FII',   label: 'FII'  },
-  { value: 'BDR',   label: 'BDR'  },
-  { value: 'BOND',  label: 'Renda Fixa' },
-  { value: 'CRYPTO', label: 'Cripto' },
-]
+/**
+ * AssetClass.code inferido pelo assetType + ticker.
+ * Retorna o code que baterá com a tabela AssetClass.
+ */
+function inferClassCode(assetType: string, ticker: string): string {
+  const tk = ticker.toUpperCase()
+  switch (assetType) {
+    case 'ETF':    return tk.endsWith('11') ? 'ETF' : 'INTERNATIONAL_ETF'
+    case 'FII':    return 'FII'
+    case 'BDR':    return 'BDR'
+    case 'BOND':   return 'FIXED_INCOME'
+    case 'CRYPTO': return 'CRYPTO'
+    case 'STOCK':
+    default:
+      // tickers com 4 letras + número sem sufixo internacional → doméstico
+      return tk.match(/^[A-Z]{4}\d{1,2}$/) ? 'DOMESTIC_STOCK' : 'STOCK'
+  }
+}
 
 export function NewTransactionDrawer({ open, onClose }: Props) {
   const [step, setStep]         = useState<Step>('type')
@@ -57,10 +69,9 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   const [brapiQuote, setBrapiQuote]         = useState<BrapiQuote | null>(null)
   const [brapiLoading, setBrapiLoading]     = useState(false)
 
-  // Cadastro novo ativo
-  const [assetClassId, setAssetClassId] = useState('')
-  const [newAssetName, setNewAssetName] = useState('')
-  const [newAssetType, setNewAssetType] = useState('STOCK')
+  // Dados inferidos (editáveis como fallback)
+  const [newAssetName, setNewAssetName]   = useState('')
+  const [fallbackClassId, setFallbackClassId] = useState('')  // só usado se inferência falhar
 
   // Detalhes
   const [tradeDate, setTradeDate] = useState(() => new Date().toISOString().split('T')[0])
@@ -78,30 +89,38 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   const netAmount   = grossAmount + (parseFloat(fees) || 0)
   const isNewAsset  = searchedTicker.length >= 2 && assetQuery.isFetched && assetQuery.data === null
 
+  // Inferidos a partir do ticker + brapi
+  const inferredType      = inferAssetType(brapiQuote, searchedTicker)
+  const inferredClassCode = inferClassCode(inferredType, searchedTicker)
+  const inferredClassId   = (assetClasses.data ?? []).find(
+    (c: AssetClass) => c.code === inferredClassCode,
+  )?.id ?? ''
+
+  // Se a inferência não encontrar a classe, usa o fallback manual
+  const resolvedClassId = inferredClassId || fallbackClassId
+  // Só precisa do select manual se a inferência falhou
+  const needsManualClass = isNewAsset && !inferredClassId
+
   // Reset ao fechar
   useEffect(() => {
     if (!open) {
       setTimeout(() => {
         setStep('type'); setTickerInput(''); setSearchedTicker('')
-        setResolvedAsset(null); setBrapiQuote(null); setAssetClassId('')
-        setNewAssetName(''); setNewAssetType('STOCK')
+        setResolvedAsset(null); setBrapiQuote(null)
+        setNewAssetName(''); setFallbackClassId('')
         setQuantity(''); setUnitPrice(''); setFees('0'); setSubmitError('')
         setTradeDate(new Date().toISOString().split('T')[0])
       }, 300)
     }
   }, [open])
 
-  // Quando asset é encontrado no nosso banco, preenche
+  // Quando asset é encontrado no banco
   useEffect(() => {
-    if (assetQuery.data) {
-      setResolvedAsset(assetQuery.data)
-      setAssetClassId(assetQuery.data.assetClassId)
-    } else {
-      setResolvedAsset(null)
-    }
+    if (assetQuery.data) setResolvedAsset(assetQuery.data)
+    else                 setResolvedAsset(null)
   }, [assetQuery.data])
 
-  // Consulta brapi quando ticker buscado muda
+  // Consulta brapi ao mudar o ticker buscado
   const fetchBrapi = useCallback(async (ticker: string) => {
     if (ticker.length < 2) return
     setBrapiLoading(true)
@@ -111,18 +130,15 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
         { signal: AbortSignal.timeout(6000) },
       )
       if (!res.ok) { setBrapiQuote(null); return }
-      const json = await res.json()
+      const json  = await res.json()
       const result: BrapiQuote | undefined = json?.results?.[0]
       if (!result) { setBrapiQuote(null); return }
       setBrapiQuote(result)
-      // pré-preenche preço unitário com cotação atual
+      // Pré-preenche nome e preço
+      setNewAssetName(result.longName || result.shortName || ticker)
       if (result.regularMarketPrice) {
         setUnitPrice(result.regularMarketPrice.toFixed(2))
       }
-      // pré-preenche nome e tipo do ativo (para cadastro novo)
-      const displayName = result.longName || result.shortName || ticker
-      setNewAssetName(displayName)
-      setNewAssetType(inferAssetType(result, ticker))
     } catch {
       setBrapiQuote(null)
     } finally {
@@ -148,7 +164,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   const canProceedAsset = () => {
     if (!searchedTicker) return false
     if (assetQuery.isLoading || brapiLoading) return false
-    if (isNewAsset) return newAssetName.trim().length > 0 && assetClassId.length > 0
+    if (isNewAsset) return newAssetName.trim().length > 0 && resolvedClassId.length > 0
     return resolvedAsset !== null
   }
 
@@ -177,16 +193,16 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
         let assetId = resolvedAsset?.id ?? ''
         if (isNewAsset) {
           const created = await createAsset.mutateAsync({
-            ticker: searchedTicker,
-            name: newAssetName,
-            assetClassId,
-            assetType: newAssetType,
+            ticker:       searchedTicker,
+            name:         newAssetName,
+            assetClassId: resolvedClassId,
+            assetType:    inferredType,
             currencyCode: 'BRL',
           })
           assetId = created.id
         }
         await createTx.mutateAsync({
-          type: txType,
+          type:        txType,
           assetId,
           tradeDate,
           quantity:    parseFloat(quantity),
@@ -203,6 +219,11 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   }
 
   const brapiName = brapiQuote?.longName || brapiQuote?.shortName
+
+  // Label legível da classe inferida
+  const inferredClassName = (assetClasses.data ?? []).find(
+    (c: AssetClass) => c.code === inferredClassCode,
+  )?.name ?? inferredClassCode
 
   return (
     <>
@@ -315,10 +336,10 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                     <p className="text-sm font-medium">{resolvedAsset.ticker}</p>
                     <p className="text-xs text-[var(--color-text-muted)] truncate">{resolvedAsset.name}</p>
                     <p className="text-xs text-[var(--color-text-faint)]">{resolvedAsset.assetClass?.name}</p>
-                    {brapiQuote && (
+                    {brapiQuote?.regularMarketPrice !== undefined && (
                       <p className="text-xs text-[var(--color-primary)] mt-1 flex items-center gap-1">
                         <Sparkles size={11} />
-                        Preço atual: {fmt.currency(brapiQuote.regularMarketPrice)}
+                        Cotação atual: {fmt.currency(brapiQuote.regularMarketPrice)}
                         {brapiQuote.regularMarketChangePercent !== undefined && (
                           <span className={brapiQuote.regularMarketChangePercent >= 0 ? 'text-emerald-400' : 'text-red-400'}>
                             ({brapiQuote.regularMarketChangePercent >= 0 ? '+' : ''}{brapiQuote.regularMarketChangePercent.toFixed(2)}%)
@@ -330,21 +351,23 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                 </div>
               )}
 
-              {/* Ativo não encontrado no banco — pré-preenchido pela brapi */}
+              {/* Ativo novo — pré-preenchido pela brapi */}
               {isNewAsset && (
                 <div className="space-y-3">
+                  {/* Banner de status */}
                   <div className={`flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg ${
                     brapiName
                       ? 'bg-[var(--color-primary-highlight)] text-[var(--color-primary)]'
                       : 'bg-amber-500/10 text-amber-400'
                   }`}>
                     {brapiName ? (
-                      <><Sparkles size={12} /> Ativo encontrado na brapi — confirme os dados abaixo</>
+                      <><Sparkles size={12} /> Encontrado na brapi — confirme o nome abaixo</>
                     ) : (
-                      <><AlertCircle size={12} /> Ativo não encontrado. Preencha manualmente.</>
+                      <><AlertCircle size={12} /> Ativo não reconhecido. Informe o nome.</>                      
                     )}
                   </div>
 
+                  {/* Nome — editável */}
                   <div>
                     <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Nome do ativo *</label>
                     <input
@@ -355,38 +378,39 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Tipo *</label>
-                      <select
-                        value={newAssetType}
-                        onChange={(e) => setNewAssetType(e.target.value)}
-                        className="w-full bg-[var(--color-surface-offset)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-                      >
-                        {ASSET_TYPES.map((t) => (
-                          <option key={t.value} value={t.value}>{t.label}</option>
-                        ))}
-                      </select>
+                  {/* Classe inferida — apenas informativo, ou select se falhar */}
+                  {!needsManualClass ? (
+                    <div className="flex items-center justify-between px-3 py-2 bg-[var(--color-surface-offset)] rounded-lg">
+                      <span className="text-xs text-[var(--color-text-muted)]">Classe inferida</span>
+                      <span className="text-xs font-medium">{inferredClassName}</span>
                     </div>
+                  ) : (
                     <div>
-                      <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Classe *</label>
+                      <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Classe de ativo *</label>
                       <select
-                        value={assetClassId}
-                        onChange={(e) => setAssetClassId(e.target.value)}
-                        className="w-full bg-[var(--color-surface-offset)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                        value={fallbackClassId}
+                        onChange={(e) => setFallbackClassId(e.target.value)}
+                        className="w-full bg-[var(--color-surface-offset)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
                       >
-                        <option value="">Selecione</option>
+                        <option value="" className="bg-[var(--color-surface)] text-[var(--color-text)]">Selecione</option>
                         {sortedClasses.map((c) => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
+                          <option
+                            key={c.id}
+                            value={c.id}
+                            className="bg-[var(--color-surface)] text-[var(--color-text)]"
+                          >
+                            {c.name}
+                          </option>
                         ))}
                       </select>
                     </div>
-                  </div>
+                  )}
 
+                  {/* Preço sugerido pela brapi */}
                   {brapiQuote?.regularMarketPrice && (
-                    <p className="text-xs text-[var(--color-text-muted)] flex items-center gap-1">
+                    <p className="text-xs text-[var(--color-text-faint)] flex items-center gap-1">
                       <Sparkles size={11} className="text-[var(--color-primary)]" />
-                      Preço atual (brapi): {fmt.currency(brapiQuote.regularMarketPrice)}
+                      Preço sugerido (brapi): {fmt.currency(brapiQuote.regularMarketPrice)}
                     </p>
                   )}
                 </div>
@@ -468,15 +492,16 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
               {[
                 { label: 'Operação',    value: txType === 'BUY' ? '↑ Compra' : '↓ Venda'               },
                 { label: 'Ativo',       value: `${searchedTicker} — ${resolvedAsset?.name ?? newAssetName}` },
-                { label: 'Data',        value: fmt.date(tradeDate)                                    },
-                { label: 'Quantidade',  value: fmt.number(parseFloat(quantity) || 0, 0)              },
-                { label: 'Preço unit.', value: fmt.currency(parseFloat(unitPrice) || 0)              },
-                { label: 'Taxas',       value: fmt.currency(parseFloat(fees) || 0)                   },
-                { label: 'Total',       value: fmt.currency(netAmount)                               },
+                { label: 'Classe',      value: resolvedAsset?.assetClass?.name ?? inferredClassName      },
+                { label: 'Data',        value: fmt.date(tradeDate)                                       },
+                { label: 'Quantidade',  value: fmt.number(parseFloat(quantity) || 0, 0)                 },
+                { label: 'Preço unit.', value: fmt.currency(parseFloat(unitPrice) || 0)                 },
+                { label: 'Taxas',       value: fmt.currency(parseFloat(fees) || 0)                      },
+                { label: 'Total',       value: fmt.currency(netAmount)                                  },
               ].map(({ label, value }) => (
                 <div key={label} className="flex justify-between text-sm">
                   <span className="text-[var(--color-text-muted)]">{label}</span>
-                  <span className="font-medium tabular-nums">{value}</span>
+                  <span className="font-medium tabular-nums text-right max-w-[60%] truncate">{value}</span>
                 </div>
               ))}
               {submitError && (
