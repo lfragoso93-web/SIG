@@ -55,6 +55,17 @@ export interface CreateAssetPayload {
   exchange?: string
 }
 
+export interface BrapiQuote {
+  ticker: string
+  shortName: string
+  longName: string
+  regularMarketPrice: number
+  regularMarketChangePercent: number
+  logourl?: string
+  sector?: string
+  type?: string
+}
+
 // ── Hooks ────────────────────────────────────────────────────────────────────
 
 export function useTransactions() {
@@ -94,6 +105,30 @@ export function useAssetByTicker(ticker: string) {
     enabled: ticker.length >= 2,
     retry: false,
     staleTime: 1000 * 60 * 5,
+  })
+}
+
+/** Consulta a brapi.dev para obter nome, preço e tipo do ativo */
+export function useBrapiQuote(ticker: string, enabled = false) {
+  return useQuery<BrapiQuote | null>({
+    queryKey: ['brapi-quote', ticker],
+    queryFn: async () => {
+      try {
+        const res = await fetch(
+          `https://brapi.dev/api/quote/${ticker.toUpperCase()}?fundamental=true`,
+        )
+        if (!res.ok) return null
+        const json = await res.json()
+        const result = json?.results?.[0]
+        if (!result) return null
+        return result as BrapiQuote
+      } catch {
+        return null
+      }
+    },
+    enabled: enabled && ticker.length >= 2,
+    retry: false,
+    staleTime: 1000 * 60 * 2,
   })
 }
 

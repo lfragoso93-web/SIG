@@ -1,7 +1,10 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { X, Search, ChevronRight, CheckCircle2, Loader2, AlertCircle } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import {
+  X, Search, ChevronRight, CheckCircle2, Loader2,
+  AlertCircle, Sparkles,
+} from 'lucide-react'
 import { fmt } from '@/lib/utils'
 import {
   useAssetClasses,
@@ -10,6 +13,7 @@ import {
   useCreateTransaction,
   type Asset,
   type AssetClass,
+  type BrapiQuote,
 } from '@/lib/hooks/useTransactions'
 
 type Step = 'type' | 'asset' | 'details' | 'confirm'
@@ -19,54 +23,75 @@ interface Props {
   onClose: () => void
 }
 
+// Mapeia tipo brapi → assetType do nosso schema
+function inferAssetType(quote: BrapiQuote | null, ticker: string): string {
+  if (!quote) return 'STOCK'
+  const name = (quote.longName ?? quote.shortName ?? '').toLowerCase()
+  const t = (quote.type ?? '').toUpperCase()
+  const tk = ticker.toUpperCase()
+
+  if (t === 'ETF' || name.includes('etf')) return 'ETF'
+  if (t === 'FII' || name.includes('fundo imobili')) return 'FII'
+  if (tk.endsWith('34') || tk.endsWith('35') || name.includes('bdr')) return 'BDR'
+  if (name.includes('tesouro')) return 'BOND'
+  return 'STOCK'
+}
+
 const ASSET_TYPES = [
-  { value: 'STOCK',      label: 'Ação' },
-  { value: 'ETF',        label: 'ETF' },
-  { value: 'FII',        label: 'FII' },
-  { value: 'BDR',        label: 'BDR' },
-  { value: 'BOND',       label: 'Renda Fixa' },
-  { value: 'CRYPTO',     label: 'Cripto' },
+  { value: 'STOCK', label: 'Ação' },
+  { value: 'ETF',   label: 'ETF'  },
+  { value: 'FII',   label: 'FII'  },
+  { value: 'BDR',   label: 'BDR'  },
+  { value: 'BOND',  label: 'Renda Fixa' },
+  { value: 'CRYPTO', label: 'Cripto' },
 ]
 
 export function NewTransactionDrawer({ open, onClose }: Props) {
-  const [step, setStep]           = useState<Step>('type')
-  const [txType, setTxType]       = useState<'BUY' | 'SELL'>('BUY')
-  const [ticker, setTicker]       = useState('')
-  const [tickerQuery, setTickerQuery] = useState('')
-  const [resolvedAsset, setResolvedAsset] = useState<Asset | null>(null)
-  const [assetClassId, setAssetClassId]   = useState('')
-  const [newAssetName, setNewAssetName]   = useState('')
-  const [newAssetType, setNewAssetType]   = useState('STOCK')
-  const [tradeDate, setTradeDate]         = useState(() => new Date().toISOString().split('T')[0])
-  const [quantity, setQuantity]           = useState('')
-  const [unitPrice, setUnitPrice]         = useState('')
-  const [fees, setFees]                   = useState('0')
-  const [submitError, setSubmitError]     = useState('')
+  const [step, setStep]         = useState<Step>('type')
+  const [txType, setTxType]     = useState<'BUY' | 'SELL'>('BUY')
+
+  // Ativo
+  const [tickerInput, setTickerInput]       = useState('')
+  const [searchedTicker, setSearchedTicker] = useState('')
+  const [resolvedAsset, setResolvedAsset]   = useState<Asset | null>(null)
+  const [brapiQuote, setBrapiQuote]         = useState<BrapiQuote | null>(null)
+  const [brapiLoading, setBrapiLoading]     = useState(false)
+
+  // Cadastro novo ativo
+  const [assetClassId, setAssetClassId] = useState('')
+  const [newAssetName, setNewAssetName] = useState('')
+  const [newAssetType, setNewAssetType] = useState('STOCK')
+
+  // Detalhes
+  const [tradeDate, setTradeDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [quantity, setQuantity]   = useState('')
+  const [unitPrice, setUnitPrice] = useState('')
+  const [fees, setFees]           = useState('0')
+  const [submitError, setSubmitError] = useState('')
 
   const assetClasses = useAssetClasses()
-  const assetQuery   = useAssetByTicker(tickerQuery)
+  const assetQuery   = useAssetByTicker(searchedTicker)
   const createAsset  = useCreateAsset()
   const createTx     = useCreateTransaction()
-  const tickerRef    = useRef<HTMLInputElement>(null)
 
-  const grossAmount  = (parseFloat(quantity) || 0) * (parseFloat(unitPrice) || 0)
-  const netAmount    = grossAmount + (parseFloat(fees) || 0)
-  const isNewAsset   = tickerQuery.length >= 2 && assetQuery.data === null
+  const grossAmount = (parseFloat(quantity) || 0) * (parseFloat(unitPrice) || 0)
+  const netAmount   = grossAmount + (parseFloat(fees) || 0)
+  const isNewAsset  = searchedTicker.length >= 2 && assetQuery.isFetched && assetQuery.data === null
 
-  // reset ao fechar
+  // Reset ao fechar
   useEffect(() => {
     if (!open) {
       setTimeout(() => {
-        setStep('type'); setTicker(''); setTickerQuery('')
-        setResolvedAsset(null); setAssetClassId(''); setNewAssetName('')
-        setNewAssetType('STOCK'); setQuantity(''); setUnitPrice('')
-        setFees('0'); setSubmitError('')
+        setStep('type'); setTickerInput(''); setSearchedTicker('')
+        setResolvedAsset(null); setBrapiQuote(null); setAssetClassId('')
+        setNewAssetName(''); setNewAssetType('STOCK')
+        setQuantity(''); setUnitPrice(''); setFees('0'); setSubmitError('')
         setTradeDate(new Date().toISOString().split('T')[0])
       }, 300)
     }
   }, [open])
 
-  // quando asset é encontrado, preenche automaticamente
+  // Quando asset é encontrado no nosso banco, preenche
   useEffect(() => {
     if (assetQuery.data) {
       setResolvedAsset(assetQuery.data)
@@ -76,65 +101,59 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     }
   }, [assetQuery.data])
 
-  const handleTickerSearch = () => {
-    setTickerQuery(ticker.trim().toUpperCase())
+  // Consulta brapi quando ticker buscado muda
+  const fetchBrapi = useCallback(async (ticker: string) => {
+    if (ticker.length < 2) return
+    setBrapiLoading(true)
+    try {
+      const res = await fetch(
+        `https://brapi.dev/api/quote/${ticker}?fundamental=true`,
+        { signal: AbortSignal.timeout(6000) },
+      )
+      if (!res.ok) { setBrapiQuote(null); return }
+      const json = await res.json()
+      const result: BrapiQuote | undefined = json?.results?.[0]
+      if (!result) { setBrapiQuote(null); return }
+      setBrapiQuote(result)
+      // pré-preenche preço unitário com cotação atual
+      if (result.regularMarketPrice) {
+        setUnitPrice(result.regularMarketPrice.toFixed(2))
+      }
+      // pré-preenche nome e tipo do ativo (para cadastro novo)
+      const displayName = result.longName || result.shortName || ticker
+      setNewAssetName(displayName)
+      setNewAssetType(inferAssetType(result, ticker))
+    } catch {
+      setBrapiQuote(null)
+    } finally {
+      setBrapiLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (searchedTicker.length >= 2) fetchBrapi(searchedTicker)
+  }, [searchedTicker, fetchBrapi])
+
+  const handleSearch = () => {
+    const t = tickerInput.trim().toUpperCase()
+    if (t.length < 2) return
+    setSearchedTicker(t)
+    setBrapiQuote(null)
   }
 
+  const sortedClasses: AssetClass[] = (assetClasses.data ?? []).slice().sort(
+    (a, b) => a.displayOrder - b.displayOrder,
+  )
+
   const canProceedAsset = () => {
-    if (!tickerQuery) return false
-    if (assetQuery.isLoading) return false
+    if (!searchedTicker) return false
+    if (assetQuery.isLoading || brapiLoading) return false
     if (isNewAsset) return newAssetName.trim().length > 0 && assetClassId.length > 0
     return resolvedAsset !== null
   }
 
-  const canProceedDetails = () => {
-    return (
-      tradeDate.length > 0 &&
-      parseFloat(quantity) > 0 &&
-      parseFloat(unitPrice) > 0
-    )
-  }
-
-  const handleNext = async () => {
-    if (step === 'type')    { setStep('asset');   return }
-    if (step === 'asset')   { setStep('details'); return }
-    if (step === 'details') { setStep('confirm'); return }
-    if (step === 'confirm') { await handleSubmit() }
-  }
-
-  const handleSubmit = async () => {
-    setSubmitError('')
-    try {
-      let assetId = resolvedAsset?.id ?? ''
-
-      // Cria ativo se novo
-      if (isNewAsset) {
-        const created = await createAsset.mutateAsync({
-          ticker:      tickerQuery,
-          name:        newAssetName,
-          assetClassId,
-          assetType:   newAssetType,
-          currencyCode: 'BRL',
-        })
-        assetId = created.id
-      }
-
-      await createTx.mutateAsync({
-        type:        txType,
-        assetId,
-        tradeDate,
-        quantity:    parseFloat(quantity),
-        unitPrice:   parseFloat(unitPrice),
-        grossAmount,
-        fees:        parseFloat(fees) || undefined,
-        status:      'POSTED',
-      })
-
-      onClose()
-    } catch {
-      setSubmitError('Erro ao salvar. Verifique os dados e tente novamente.')
-    }
-  }
+  const canProceedDetails = () =>
+    tradeDate.length > 0 && parseFloat(quantity) > 0 && parseFloat(unitPrice) > 0
 
   const STEPS: Step[] = ['type', 'asset', 'details', 'confirm']
   const stepIndex = STEPS.indexOf(step)
@@ -146,11 +165,44 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     confirm: 'Confirmar',
   }
 
-  const sortedClasses: AssetClass[] = (assetClasses.data ?? []).slice().sort(
-    (a, b) => a.displayOrder - b.displayOrder
-  )
-
   const isSubmitting = createAsset.isPending || createTx.isPending
+
+  const handleNext = async () => {
+    if (step === 'type')    { setStep('asset');   return }
+    if (step === 'asset')   { setStep('details'); return }
+    if (step === 'details') { setStep('confirm'); return }
+    if (step === 'confirm') {
+      setSubmitError('')
+      try {
+        let assetId = resolvedAsset?.id ?? ''
+        if (isNewAsset) {
+          const created = await createAsset.mutateAsync({
+            ticker: searchedTicker,
+            name: newAssetName,
+            assetClassId,
+            assetType: newAssetType,
+            currencyCode: 'BRL',
+          })
+          assetId = created.id
+        }
+        await createTx.mutateAsync({
+          type: txType,
+          assetId,
+          tradeDate,
+          quantity:    parseFloat(quantity),
+          unitPrice:   parseFloat(unitPrice),
+          grossAmount,
+          fees:        parseFloat(fees) || undefined,
+          status:      'POSTED',
+        })
+        onClose()
+      } catch {
+        setSubmitError('Erro ao salvar. Verifique os dados e tente novamente.')
+      }
+    }
+  }
+
+  const brapiName = brapiQuote?.longName || brapiQuote?.shortName
 
   return (
     <>
@@ -229,46 +281,70 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
           {/* Step 2: Ativo */}
           {step === 'asset' && (
             <div className="space-y-4">
+              {/* Campo de busca */}
               <div>
                 <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Ticker</label>
                 <div className="flex gap-2">
                   <input
-                    ref={tickerRef}
-                    value={ticker}
-                    onChange={(e) => setTicker(e.target.value.toUpperCase())}
-                    onKeyDown={(e) => e.key === 'Enter' && handleTickerSearch()}
+                    value={tickerInput}
+                    onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                     placeholder="Ex: PETR4"
+                    maxLength={10}
                     className="flex-1 bg-[var(--color-surface-offset)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] placeholder:text-[var(--color-text-faint)]"
                   />
                   <button
-                    onClick={handleTickerSearch}
-                    disabled={ticker.trim().length < 2}
+                    onClick={handleSearch}
+                    disabled={tickerInput.trim().length < 2}
                     className="px-3 py-2 bg-[var(--color-primary)] text-white rounded-lg text-sm hover:bg-[var(--color-primary-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
-                    {assetQuery.isLoading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
+                    {(assetQuery.isLoading || brapiLoading) ? (
+                      <Loader2 size={15} className="animate-spin" />
+                    ) : (
+                      <Search size={15} />
+                    )}
                   </button>
                 </div>
               </div>
 
-              {/* Ativo encontrado */}
+              {/* Ativo encontrado no banco */}
               {resolvedAsset && (
-                <div className="flex items-center gap-3 px-3 py-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
-                  <CheckCircle2 size={16} className="text-emerald-400 flex-shrink-0" />
-                  <div className="min-w-0">
+                <div className="flex items-start gap-3 px-3 py-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
+                  <CheckCircle2 size={16} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">{resolvedAsset.ticker}</p>
                     <p className="text-xs text-[var(--color-text-muted)] truncate">{resolvedAsset.name}</p>
                     <p className="text-xs text-[var(--color-text-faint)]">{resolvedAsset.assetClass?.name}</p>
+                    {brapiQuote && (
+                      <p className="text-xs text-[var(--color-primary)] mt-1 flex items-center gap-1">
+                        <Sparkles size={11} />
+                        Preço atual: {fmt.currency(brapiQuote.regularMarketPrice)}
+                        {brapiQuote.regularMarketChangePercent !== undefined && (
+                          <span className={brapiQuote.regularMarketChangePercent >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                            ({brapiQuote.regularMarketChangePercent >= 0 ? '+' : ''}{brapiQuote.regularMarketChangePercent.toFixed(2)}%)
+                          </span>
+                        )}
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
 
-              {/* Ativo não encontrado — cadastro inline */}
+              {/* Ativo não encontrado no banco — pré-preenchido pela brapi */}
               {isNewAsset && (
-                <div className="space-y-3 pt-1">
-                  <p className="text-xs text-amber-400 flex items-center gap-1.5">
-                    <AlertCircle size={13} />
-                    Ativo não encontrado. Preencha para cadastrar.
-                  </p>
+                <div className="space-y-3">
+                  <div className={`flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg ${
+                    brapiName
+                      ? 'bg-[var(--color-primary-highlight)] text-[var(--color-primary)]'
+                      : 'bg-amber-500/10 text-amber-400'
+                  }`}>
+                    {brapiName ? (
+                      <><Sparkles size={12} /> Ativo encontrado na brapi — confirme os dados abaixo</>
+                    ) : (
+                      <><AlertCircle size={12} /> Ativo não encontrado. Preencha manualmente.</>
+                    )}
+                  </div>
+
                   <div>
                     <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Nome do ativo *</label>
                     <input
@@ -278,6 +354,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                       className="w-full bg-[var(--color-surface-offset)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] placeholder:text-[var(--color-text-faint)]"
                     />
                   </div>
+
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Tipo *</label>
@@ -305,6 +382,13 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                       </select>
                     </div>
                   </div>
+
+                  {brapiQuote?.regularMarketPrice && (
+                    <p className="text-xs text-[var(--color-text-muted)] flex items-center gap-1">
+                      <Sparkles size={11} className="text-[var(--color-primary)]" />
+                      Preço atual (brapi): {fmt.currency(brapiQuote.regularMarketPrice)}
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -326,9 +410,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                 <div>
                   <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Quantidade</label>
                   <input
-                    type="number"
-                    min="0"
-                    step="1"
+                    type="number" min="0" step="1"
                     value={quantity}
                     onChange={(e) => setQuantity(e.target.value)}
                     placeholder="0"
@@ -336,11 +418,14 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Preço unitário (R$)</label>
+                  <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">
+                    Preço unitário (R$)
+                    {brapiQuote?.regularMarketPrice && (
+                      <span className="ml-1 text-[var(--color-primary)] text-[10px]">brapi ✓</span>
+                    )}
+                  </label>
                   <input
-                    type="number"
-                    min="0"
-                    step="0.01"
+                    type="number" min="0" step="0.01"
                     value={unitPrice}
                     onChange={(e) => setUnitPrice(e.target.value)}
                     placeholder="0,00"
@@ -351,9 +436,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
               <div>
                 <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Taxas / Corretagem (R$)</label>
                 <input
-                  type="number"
-                  min="0"
-                  step="0.01"
+                  type="number" min="0" step="0.01"
                   value={fees}
                   onChange={(e) => setFees(e.target.value)}
                   className="w-full bg-[var(--color-surface-offset)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] tabular-nums"
@@ -367,7 +450,9 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                   </div>
                   <div className="flex justify-between text-sm font-semibold">
                     <span>Total</span>
-                    <span className={`tabular-nums ${txType === 'BUY' ? 'text-red-400' : 'text-emerald-400'}`}>
+                    <span className={`tabular-nums ${
+                      txType === 'BUY' ? 'text-red-400' : 'text-emerald-400'
+                    }`}>
                       {txType === 'BUY' ? '-' : '+'}{fmt.currency(netAmount)}
                     </span>
                   </div>
@@ -381,13 +466,13 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
             <div className="space-y-3">
               <p className="text-xs text-[var(--color-text-muted)] mb-4">Revise os dados antes de confirmar</p>
               {[
-                { label: 'Operação',    value: txType === 'BUY' ? '↑ Compra' : '↓ Venda' },
-                { label: 'Ativo',       value: `${tickerQuery} — ${resolvedAsset?.name ?? newAssetName}` },
-                { label: 'Data',        value: fmt.date(tradeDate) },
-                { label: 'Quantidade',  value: fmt.number(parseFloat(quantity), 0) },
-                { label: 'Preço unit.', value: fmt.currency(parseFloat(unitPrice)) },
-                { label: 'Taxas',       value: fmt.currency(parseFloat(fees) || 0) },
-                { label: 'Total',       value: fmt.currency(netAmount) },
+                { label: 'Operação',    value: txType === 'BUY' ? '↑ Compra' : '↓ Venda'               },
+                { label: 'Ativo',       value: `${searchedTicker} — ${resolvedAsset?.name ?? newAssetName}` },
+                { label: 'Data',        value: fmt.date(tradeDate)                                    },
+                { label: 'Quantidade',  value: fmt.number(parseFloat(quantity) || 0, 0)              },
+                { label: 'Preço unit.', value: fmt.currency(parseFloat(unitPrice) || 0)              },
+                { label: 'Taxas',       value: fmt.currency(parseFloat(fees) || 0)                   },
+                { label: 'Total',       value: fmt.currency(netAmount)                               },
               ].map(({ label, value }) => (
                 <div key={label} className="flex justify-between text-sm">
                   <span className="text-[var(--color-text-muted)]">{label}</span>
@@ -426,7 +511,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
             {isSubmitting ? (
               <><Loader2 size={15} className="animate-spin" /> Salvando...</>
             ) : step === 'confirm' ? (
-              <>Confirmar</>
+              'Confirmar'
             ) : (
               <>Próximo <ChevronRight size={15} /></>
             )}
