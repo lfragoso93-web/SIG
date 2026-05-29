@@ -76,6 +76,12 @@ export class AssetsService {
     })
   }
 
+  /**
+   * Cria o ativo se não existir. Se o ticker já estiver cadastrado,
+   * retorna o registro existente silenciosamente (upsert semântico).
+   * Isso permite que o drawer registre múltiplas transações do mesmo
+   * ativo sem precisar distinguir "novo" de "existente" no front-end.
+   */
   async create(data: CreateAssetInput) {
     const isTesouro = isTesouroDireto(data.assetType, data.issuer)
 
@@ -97,13 +103,13 @@ export class AssetsService {
       throw new Error('O campo ticker é obrigatório para ativos que não são Tesouro Direto.')
     }
 
-    // Verifica se o ticker já existe antes de tentar criar (evita P2002 genérico)
-    const existing = await prisma.asset.findUnique({ where: { ticker } })
-    if (existing) {
-      throw new Error(
-        `O ativo "${ticker}" já está cadastrado. Use-o diretamente ou edite-o na tela de Ativos.`,
-      )
-    }
+    // Upsert semântico: retorna o existente se o ticker já estiver cadastrado.
+    // Mantém múltiplas transações do mesmo ativo sem conflito.
+    const existing = await prisma.asset.findUnique({
+      where: { ticker },
+      include: { assetClass: true },
+    })
+    if (existing) return existing
 
     try {
       return await prisma.asset.create({
@@ -126,14 +132,17 @@ export class AssetsService {
         include: { assetClass: true },
       })
     } catch (err) {
-      // Fallback para race condition: dois creates simultâneos do mesmo ticker
+      // Race condition: dois creates simultâneos do mesmo ticker.
+      // Tenta buscar o que o outro processo criou.
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === 'P2002'
       ) {
-        throw new Error(
-          `O ativo "${ticker}" já está cadastrado. Use-o diretamente ou edite-o na tela de Ativos.`,
-        )
+        const race = await prisma.asset.findUnique({
+          where: { ticker },
+          include: { assetClass: true },
+        })
+        if (race) return race
       }
       throw err
     }
