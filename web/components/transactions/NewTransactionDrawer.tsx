@@ -40,10 +40,6 @@ async function fetchQuoteFromBackend(ticker: string): Promise<BackendQuote | nul
   }
 }
 
-/**
- * Busca o ativo diretamente na API (sem cache do React Query).
- * Retorna null se 404, lança em outros erros.
- */
 async function fetchAssetByTickerDirect(ticker: string): Promise<Asset | null> {
   try {
     const { data } = await api.get<Asset>(`/assets/ticker/${ticker.toUpperCase()}`)
@@ -55,7 +51,6 @@ async function fetchAssetByTickerDirect(ticker: string): Promise<Asset | null> {
   }
 }
 
-// Mapa: nome da classe (como vem do banco) → assetType
 const CLASS_NAME_TO_ASSET_TYPE: Record<string, string> = {
   'Fundo Imobiliário':    'FII',
   'ETF Nacional':         'ETF',
@@ -70,7 +65,6 @@ const CLASS_NAME_TO_ASSET_TYPE: Record<string, string> = {
   'Caixa':                'CASH',
 }
 
-// Extrai mensagem legível de erros Axios/API
 function extractErrorMessage(error: unknown): string {
   if (!error) return 'Erro desconhecido.'
   const err = error as {
@@ -109,7 +103,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   const createAsset  = useCreateAsset()
   const createTx     = useCreateTransaction()
 
-  // Aguarda as classes carregarem: true enquanto a lista não estiver disponível
   const classesLoading = assetClasses.isLoading || (!assetClasses.data && !assetClasses.isError)
 
   const grossAmount = (parseFloat(quantity) || 0) * (parseFloat(unitPrice) || 0)
@@ -151,9 +144,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
       setBackendQuote(quote)
       if (quote?.name) setNewAssetName(quote.name)
       if (quote?.inferredClass) {
-        const matched = classes.find(
-          (c: AssetClass) => c.name === quote.inferredClass,
-        )
+        const matched = classes.find((c: AssetClass) => c.name === quote.inferredClass)
         if (matched) setSelectedClassId(matched.id)
       }
     } catch {
@@ -167,7 +158,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   const handleSearch = () => {
     const t = tickerInput.trim().toUpperCase()
     if (t.length < 2) return
-    // Garante que as classes estejam carregadas antes de buscar o quote
     const classes = assetClasses.data ?? []
     setSearchedTicker(t)
     runSearch(t, classes)
@@ -208,13 +198,8 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
         let assetId = resolvedAsset?.id ?? ''
 
         if (isNewAsset) {
-          // Busca direta (sem cache) para garantir que o ativo realmente não existe.
-          // Isso evita criar um duplicado quando o React Query serviu null por cache stale
-          // ou quando o ativo foi criado numa transação anterior na mesma sessão.
           const existingAsset = await fetchAssetByTickerDirect(searchedTicker)
-
           if (existingAsset) {
-            // Ativo já existe: aproveita o id encontrado, sem criar
             assetId = existingAsset.id
             setResolvedAsset(existingAsset)
           } else {
@@ -246,14 +231,18 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     }
   }
 
-  // ── Estilos reutilizáveis ─────────────────────────────────────────────────
-  const inputClass = [
+  // ── Estilos base ──────────────────────────────────────────────────────────
+  const inputBase = [
     'w-full rounded-lg px-3 py-2 text-sm',
     'bg-[var(--color-surface-offset)] border border-[var(--color-border)]',
-    'placeholder:text-[var(--color-text-faint)] text-[var(--color-text)]',
+    'text-[var(--color-text)]',
+    'placeholder:text-[var(--color-text-faint)]',
     'focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-transparent',
     'transition-all duration-150',
   ].join(' ')
+
+  // Select precisa de color-scheme para o dropdown nativo do OS seguir o tema
+  const selectClass = `${inputBase} appearance-none`
 
   const labelClass = 'block text-xs font-medium text-[var(--color-text-muted)] mb-1.5'
 
@@ -328,7 +317,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
           ))}
         </div>
 
-        {/* Divisor */}
         <div className="h-px bg-[var(--color-border)] mx-5" />
 
         {/* Body */}
@@ -360,9 +348,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                         ? t === 'BUY' ? 'bg-emerald-500/20' : 'bg-red-500/20'
                         : 'bg-[var(--color-surface-offset)]'
                     }`}>
-                      {t === 'BUY'
-                        ? <TrendingUp size={13} />
-                        : <TrendingDown size={13} />}
+                      {t === 'BUY' ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
                     </div>
                     <div className="text-left">
                       <p className="font-semibold text-sm">{t === 'BUY' ? 'Compra' : 'Venda'}</p>
@@ -387,7 +373,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                     onKeyDown={(e) => e.key === 'Enter' && !classesLoading && handleSearch()}
                     placeholder="Ex: PETR4, MXRF11"
                     maxLength={30}
-                    className={inputClass}
+                    className={inputBase}
                   />
                   <button
                     onClick={handleSearch}
@@ -434,11 +420,23 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                       ? <><Sparkles size={11} /> <span>Nome sugerido — confirme os dados</span></>
                       : <><AlertCircle size={11} /> <span>Ativo não encontrado. Preencha manualmente.</span></>}
                   </div>
+
+                  {/* Nome: textarea para acomodar nomes longos (Tesouro Direto) */}
                   <div>
                     <label className={labelClass}>Nome do ativo *</label>
-                    <input value={newAssetName} onChange={(e) => setNewAssetName(e.target.value)}
-                      placeholder="Ex: Maxi Renda FII" className={inputClass} />
+                    <textarea
+                      value={newAssetName}
+                      onChange={(e) => setNewAssetName(e.target.value)}
+                      placeholder="Ex: Tesouro IPCA+ 2035"
+                      rows={2}
+                      className={[
+                        inputBase,
+                        'resize-none leading-snug',
+                      ].join(' ')}
+                    />
                   </div>
+
+                  {/* Classe: select com color-scheme explícito para dark mode */}
                   <div>
                     <label className={labelClass}>
                       Classe de ativo *
@@ -446,14 +444,42 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                         <span className="ml-1.5 text-[var(--color-primary)] font-normal opacity-70">(sugerida)</span>
                       )}
                     </label>
-                    <select value={selectedClassId} onChange={(e) => setSelectedClassId(e.target.value)}
-                      style={{ colorScheme: 'dark' }}
-                      className={inputClass}>
-                      <option value="">Selecione a classe</option>
-                      {sortedClasses.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <select
+                        value={selectedClassId}
+                        onChange={(e) => setSelectedClassId(e.target.value)}
+                        style={{
+                          colorScheme: 'dark',
+                          // garante que o texto do option selecionado seja legível
+                          // em qualquer tema (iOS/macOS ignoram color-scheme no select)
+                          color: 'var(--color-text)',
+                          backgroundColor: 'var(--color-surface-offset)',
+                        }}
+                        className={selectClass}
+                      >
+                        <option
+                          value=""
+                          style={{ color: 'var(--color-text-faint)', backgroundColor: 'var(--color-surface-offset)' }}
+                        >
+                          Selecione a classe
+                        </option>
+                        {sortedClasses.map((c) => (
+                          <option
+                            key={c.id}
+                            value={c.id}
+                            style={{ color: 'var(--color-text)', backgroundColor: 'var(--color-surface-offset)' }}
+                          >
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      {/* seta custom para substituir a nativa que desaparece com appearance-none */}
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -467,27 +493,27 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                 <label className={labelClass}>Data do negócio</label>
                 <input type="date" value={tradeDate}
                   onChange={(e) => setTradeDate(e.target.value)}
-                  className={inputClass} />
+                  className={inputBase} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelClass}>Quantidade</label>
                   <input type="number" min="0" step="1" value={quantity}
                     onChange={(e) => setQuantity(e.target.value)}
-                    placeholder="0" className={`${inputClass} tabular-nums`} />
+                    placeholder="0" className={`${inputBase} tabular-nums`} />
                 </div>
                 <div>
                   <label className={labelClass}>Preço unitário</label>
                   <input type="number" min="0" step="0.01" value={unitPrice}
                     onChange={(e) => setUnitPrice(e.target.value)}
-                    placeholder="0,00" className={`${inputClass} tabular-nums`} />
+                    placeholder="0,00" className={`${inputBase} tabular-nums`} />
                 </div>
               </div>
               <div>
                 <label className={labelClass}>Taxas (R$)</label>
                 <input type="number" min="0" step="0.01" value={fees}
                   onChange={(e) => setFees(e.target.value)}
-                  className={`${inputClass} tabular-nums`} />
+                  className={`${inputBase} tabular-nums`} />
               </div>
 
               {grossAmount > 0 && (
@@ -523,21 +549,21 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
 
               <div className="bg-[var(--color-surface-offset)] rounded-xl divide-y divide-[var(--color-border)]">
                 {[
-                  { label: 'Operação',    value: txType === 'BUY' ? 'Compra'   : 'Venda',
+                  { label: 'Operação',    value: txType === 'BUY' ? 'Compra' : 'Venda',
                     accent: txType === 'BUY' ? 'text-emerald-400' : 'text-red-400' },
-                  { label: 'Ativo',       value: searchedTicker,                  accent: 'font-semibold' },
-                  { label: 'Nome',        value: resolvedAsset?.name ?? newAssetName,  accent: '' },
+                  { label: 'Ativo',       value: searchedTicker,                         accent: 'font-semibold' },
+                  { label: 'Nome',        value: resolvedAsset?.name ?? newAssetName,     accent: '' },
                   { label: 'Classe',      value: resolvedAsset?.assetClass?.name ?? selectedClassName, accent: '' },
-                  { label: 'Data',        value: fmt.date(tradeDate),             accent: '' },
+                  { label: 'Data',        value: fmt.date(tradeDate),                    accent: '' },
                   { label: 'Quantidade',  value: fmt.number(parseFloat(quantity) || 0, 0), accent: 'tabular-nums' },
                   { label: 'Preço unit.', value: fmt.currency(parseFloat(unitPrice) || 0), accent: 'tabular-nums' },
-                  { label: 'Taxas',       value: fmt.currency(parseFloat(fees) || 0),     accent: 'tabular-nums' },
+                  { label: 'Taxas',       value: fmt.currency(parseFloat(fees) || 0),    accent: 'tabular-nums' },
                   { label: 'Total',       value: fmt.currency(netAmount),
                     accent: `tabular-nums font-semibold ${txType === 'BUY' ? 'text-red-400' : 'text-emerald-400'}` },
                 ].map(({ label, value, accent }) => (
-                  <div key={label} className="flex justify-between items-center px-3.5 py-2.5">
-                    <span className="text-xs text-[var(--color-text-muted)]">{label}</span>
-                    <span className={`text-xs text-right max-w-[58%] truncate ${accent}`}>{value}</span>
+                  <div key={label} className="flex justify-between items-start gap-3 px-3.5 py-2.5">
+                    <span className="text-xs text-[var(--color-text-muted)] flex-shrink-0">{label}</span>
+                    <span className={`text-xs text-right break-words min-w-0 ${accent}`}>{value}</span>
                   </div>
                 ))}
               </div>
