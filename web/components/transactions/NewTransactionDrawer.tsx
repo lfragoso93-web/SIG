@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  X, ChevronRight, CheckCircle2, Loader2,
-  AlertCircle, Sparkles, TrendingUp, TrendingDown, Search,
+  X, CheckCircle2, Loader2, AlertCircle, Sparkles,
+  TrendingUp, TrendingDown, Search,
 } from 'lucide-react'
 import { fmt } from '@/lib/utils'
 import { api } from '@/lib/api'
@@ -14,8 +14,6 @@ import {
   type Asset,
   type AssetClass,
 } from '@/lib/hooks/useTransactions'
-
-type Step = 'type' | 'asset' | 'details' | 'confirm'
 
 interface Props {
   open: boolean
@@ -30,7 +28,7 @@ interface BackendQuote {
   exchDisp?:     string
 }
 
-// ── API helpers ────────────────────────────────────────────────────────────
+// ── API helpers ───────────────────────────────────────────────────────────────
 async function fetchQuoteFromBackend(ticker: string): Promise<BackendQuote | null> {
   try {
     const res = await api.get<BackendQuote>(`/assets/quote/${encodeURIComponent(ticker)}`)
@@ -51,7 +49,6 @@ async function fetchAssetByTickerDirect(ticker: string): Promise<Asset | null> {
   }
 }
 
-/** Busca ativos já cadastrados que contenham o termo digitado. */
 async function searchLocalAssets(query: string): Promise<Asset[]> {
   if (query.length < 2) return []
   try {
@@ -91,7 +88,6 @@ function extractErrorMessage(error: unknown): string {
   return 'Erro ao salvar. Tente novamente.'
 }
 
-/** Destaca o trecho que corresponde ao termo buscado dentro de um texto. */
 function Highlight({ text, query }: { text: string; query: string }) {
   if (!query) return <>{text}</>
   const idx = text.toLowerCase().indexOf(query.toLowerCase())
@@ -107,7 +103,7 @@ function Highlight({ text, query }: { text: string; query: string }) {
   )
 }
 
-// ── Combobox de ativo ──────────────────────────────────────────────────────
+// ── AssetCombobox ─────────────────────────────────────────────────────────────
 interface AssetComboboxProps {
   value: string
   onChange: (raw: string) => void
@@ -118,40 +114,28 @@ interface AssetComboboxProps {
 }
 
 function AssetCombobox({
-  value,
-  onChange,
-  onSelect,
-  onTriggerRemoteSearch,
-  inputClass,
-  disabled,
+  value, onChange, onSelect, onTriggerRemoteSearch, inputClass, disabled,
 }: AssetComboboxProps) {
   const [suggestions, setSuggestions] = useState<Asset[]>([])
   const [loading, setLoading]         = useState(false)
   const [open, setOpen]               = useState(false)
   const [activeIdx, setActiveIdx]     = useState(-1)
-  const debounceRef                   = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const containerRef                  = useRef<HTMLDivElement>(null)
-  const listRef                       = useRef<HTMLUListElement>(null)
+  const debounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const listRef      = useRef<HTMLUListElement>(null)
 
-  // Fecha ao clicar fora
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node))
         setOpen(false)
-      }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Debounce 400ms → busca local
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    if (value.length < 2) {
-      setSuggestions([])
-      setOpen(false)
-      return
-    }
+    if (value.length < 2) { setSuggestions([]); setOpen(false); return }
     debounceRef.current = setTimeout(async () => {
       setLoading(true)
       const results = await searchLocalAssets(value)
@@ -163,7 +147,6 @@ function AssetCombobox({
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [value])
 
-  // Scroll item ativo em vista
   useEffect(() => {
     if (activeIdx >= 0 && listRef.current) {
       const el = listRef.current.children[activeIdx] as HTMLElement | undefined
@@ -173,34 +156,22 @@ function AssetCombobox({
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (!open && e.key !== 'Enter') return
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setActiveIdx(i => Math.min(i + 1, suggestions.length - 1))
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setActiveIdx(i => Math.max(i - 1, -1))
-    } else if (e.key === 'Escape') {
-      setOpen(false)
-      setActiveIdx(-1)
-    } else if (e.key === 'Enter') {
+    if (e.key === 'ArrowDown')  { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, suggestions.length - 1)) }
+    else if (e.key === 'ArrowUp')   { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, -1)) }
+    else if (e.key === 'Escape')    { setOpen(false); setActiveIdx(-1) }
+    else if (e.key === 'Enter') {
       e.preventDefault()
       if (open && activeIdx >= 0 && suggestions[activeIdx]) {
         handleSelect(suggestions[activeIdx])
       } else {
-        // Nenhuma sugestão selecionada → dispara busca remota
         const t = value.trim().toUpperCase()
-        if (t.length >= 2) {
-          setOpen(false)
-          onTriggerRemoteSearch(t)
-        }
+        if (t.length >= 2) { setOpen(false); onTriggerRemoteSearch(t) }
       }
     }
   }
 
   function handleSelect(asset: Asset) {
-    setOpen(false)
-    setSuggestions([])
-    onSelect(asset)
+    setOpen(false); setSuggestions([]); onSelect(asset)
   }
 
   return (
@@ -208,10 +179,7 @@ function AssetCombobox({
       <div className="relative">
         <input
           value={value}
-          onChange={(e) => {
-            onChange(e.target.value.toUpperCase())
-            setOpen(true)
-          }}
+          onChange={(e) => { onChange(e.target.value.toUpperCase()); setOpen(true) }}
           onKeyDown={handleKeyDown}
           onFocus={() => suggestions.length > 0 && setOpen(true)}
           placeholder="Ex: PETR4, MXRF11, BTC…"
@@ -221,14 +189,11 @@ function AssetCombobox({
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={open}
-          aria-activedescendant={activeIdx >= 0 ? `opt-${activeIdx}` : undefined}
           autoComplete="off"
           spellCheck={false}
         />
         <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-faint)]">
-          {loading
-            ? <Loader2 size={14} className="animate-spin" />
-            : <Search size={14} />}
+          {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
         </span>
       </div>
 
@@ -236,20 +201,17 @@ function AssetCombobox({
         <ul
           ref={listRef}
           role="listbox"
-          className="absolute z-50 left-0 right-0 mt-1.5 max-h-52 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[0_8px_24px_oklch(0_0_0/0.35)] divide-y divide-[var(--color-border)]"
+          className="absolute z-50 left-0 right-0 mt-1.5 max-h-48 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[0_8px_24px_oklch(0_0_0/0.35)] divide-y divide-[var(--color-border)]"
         >
           {suggestions.map((asset, i) => (
             <li
               key={asset.id}
-              id={`opt-${i}`}
               role="option"
               aria-selected={i === activeIdx}
               onMouseEnter={() => setActiveIdx(i)}
               onMouseDown={(e) => { e.preventDefault(); handleSelect(asset) }}
               className={`flex items-center justify-between gap-3 px-3.5 py-2.5 cursor-pointer transition-colors ${
-                i === activeIdx
-                  ? 'bg-[var(--color-primary)]/12'
-                  : 'hover:bg-[var(--color-surface-offset)]'
+                i === activeIdx ? 'bg-[var(--color-primary)]/12' : 'hover:bg-[var(--color-surface-offset)]'
               }`}
             >
               <div className="min-w-0">
@@ -269,7 +231,6 @@ function AssetCombobox({
               )}
             </li>
           ))}
-          {/* Rodapé: busca remota caso não encontre */}
           <li
             role="option"
             onMouseDown={(e) => {
@@ -288,17 +249,16 @@ function AssetCombobox({
   )
 }
 
-// ── Drawer principal ───────────────────────────────────────────────────────
+// ── Drawer principal ──────────────────────────────────────────────────────────
 export function NewTransactionDrawer({ open, onClose }: Props) {
-  const [step, setStep]     = useState<Step>('type')
   const [txType, setTxType] = useState<'BUY' | 'SELL'>('BUY')
 
-  const [tickerInput, setTickerInput]       = useState('')
+  const [tickerInput, setTickerInput]     = useState('')
   const [searchedTicker, setSearchedTicker] = useState('')
-  const [resolvedAsset, setResolvedAsset]   = useState<Asset | null>(null)
-  const [backendQuote, setBackendQuote]     = useState<BackendQuote | null>(null)
-  const [searchLoading, setSearchLoading]   = useState(false)
-  const [searchDone, setSearchDone]         = useState(false)
+  const [resolvedAsset, setResolvedAsset] = useState<Asset | null>(null)
+  const [backendQuote, setBackendQuote]   = useState<BackendQuote | null>(null)
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchDone, setSearchDone]       = useState(false)
 
   const [newAssetName, setNewAssetName]       = useState('')
   const [selectedClassId, setSelectedClassId] = useState('')
@@ -314,6 +274,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   const createTx     = useCreateTransaction()
 
   const classesLoading = assetClasses.isLoading || (!assetClasses.data && !assetClasses.isError)
+  const isSubmitting   = createAsset.isPending || createTx.isPending
 
   const grossAmount = (parseFloat(quantity) || 0) * (parseFloat(unitPrice) || 0)
   const netAmount   = grossAmount + (parseFloat(fees) || 0)
@@ -324,10 +285,16 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   )?.name ?? ''
   const inferredAssetType = CLASS_NAME_TO_ASSET_TYPE[selectedClassName] ?? 'OTHER'
 
+  const sortedClasses: AssetClass[] = (assetClasses.data ?? []).slice().sort(
+    (a, b) => a.displayOrder - b.displayOrder,
+  )
+
+  // Reset ao fechar
   useEffect(() => {
     if (!open) {
       setTimeout(() => {
-        setStep('type'); setTickerInput(''); setSearchedTicker('')
+        setTxType('BUY')
+        setTickerInput(''); setSearchedTicker('')
         setResolvedAsset(null); setBackendQuote(null)
         setNewAssetName(''); setSelectedClassId('')
         setQuantity(''); setUnitPrice(''); setFees('0')
@@ -337,7 +304,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     }
   }, [open])
 
-  /** Chamado quando o usuário seleciona um ativo existente no combobox. */
   const handleSelectLocalAsset = useCallback((asset: Asset) => {
     setTickerInput(asset.ticker)
     setSearchedTicker(asset.ticker)
@@ -348,7 +314,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     setSelectedClassId('')
   }, [])
 
-  /** Chamado quando o usuário pressiona Enter sem sugestão ou clica em "buscar no mercado". */
   const handleTriggerRemoteSearch = useCallback(async (ticker: string) => {
     setSearchedTicker(ticker)
     setTickerInput(ticker)
@@ -358,9 +323,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     setBackendQuote(null)
     setNewAssetName('')
     setSelectedClassId('')
-
     try {
-      // 1. Tenta encontrar no banco pelo ticker exato
       const existing = await fetchAssetByTickerDirect(ticker)
       if (existing) {
         setResolvedAsset(existing)
@@ -368,8 +331,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
         setSearchLoading(false)
         return
       }
-
-      // 2. Busca cotação no mercado (Yahoo Finance / backend)
       const quote = await fetchQuoteFromBackend(ticker)
       setBackendQuote(quote)
       if (quote?.name) setNewAssetName(quote.name)
@@ -387,71 +348,47 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     }
   }, [assetClasses.data])
 
-  const sortedClasses: AssetClass[] = (assetClasses.data ?? []).slice().sort(
-    (a, b) => a.displayOrder - b.displayOrder,
-  )
-
-  const canProceedAsset = () => {
-    if (!searchedTicker || !searchDone) return false
-    if (searchLoading) return false
-    if (isNewAsset) return newAssetName.trim().length > 0 && selectedClassId.length > 0
-    return resolvedAsset !== null
+  const canSubmit = () => {
+    if (!searchedTicker || !searchDone || searchLoading) return false
+    if (isNewAsset && (newAssetName.trim().length === 0 || selectedClassId.length === 0)) return false
+    if (!resolvedAsset && !isNewAsset) return false
+    if (!tradeDate || parseFloat(quantity) <= 0 || parseFloat(unitPrice) <= 0) return false
+    return true
   }
 
-  const canProceedDetails = () =>
-    tradeDate.length > 0 && parseFloat(quantity) > 0 && parseFloat(unitPrice) > 0
-
-  const STEPS: Step[] = ['type', 'asset', 'details', 'confirm']
-  const stepIndex = STEPS.indexOf(step)
-  const isSubmitting = createAsset.isPending || createTx.isPending
-
-  const stepConfig = {
-    type:    { label: 'Tipo de operação', step: 1 },
-    asset:   { label: 'Ativo',            step: 2 },
-    details: { label: 'Detalhes',         step: 3 },
-    confirm: { label: 'Confirmar',        step: 4 },
-  }
-
-  const handleNext = async () => {
-    if (step === 'type')    { setStep('asset');   return }
-    if (step === 'asset')   { setStep('details'); return }
-    if (step === 'details') { setStep('confirm'); return }
-    if (step === 'confirm') {
-      setSubmitError('')
-      try {
-        let assetId = resolvedAsset?.id ?? ''
-
-        if (isNewAsset) {
-          const existingAsset = await fetchAssetByTickerDirect(searchedTicker)
-          if (existingAsset) {
-            assetId = existingAsset.id
-            setResolvedAsset(existingAsset)
-          } else {
-            const created = await createAsset.mutateAsync({
-              ticker:       searchedTicker,
-              name:         newAssetName,
-              assetClassId: selectedClassId,
-              assetType:    inferredAssetType,
-              currencyCode: 'BRL',
-            })
-            assetId = created.id
-          }
+  const handleSubmit = async () => {
+    setSubmitError('')
+    try {
+      let assetId = resolvedAsset?.id ?? ''
+      if (isNewAsset) {
+        const existingAsset = await fetchAssetByTickerDirect(searchedTicker)
+        if (existingAsset) {
+          assetId = existingAsset.id
+          setResolvedAsset(existingAsset)
+        } else {
+          const created = await createAsset.mutateAsync({
+            ticker:       searchedTicker,
+            name:         newAssetName,
+            assetClassId: selectedClassId,
+            assetType:    inferredAssetType,
+            currencyCode: 'BRL',
+          })
+          assetId = created.id
         }
-
-        await createTx.mutateAsync({
-          type:        txType,
-          assetId,
-          tradeDate,
-          quantity:    parseFloat(quantity),
-          unitPrice:   parseFloat(unitPrice),
-          grossAmount,
-          fees:        parseFloat(fees) || undefined,
-          status:      'POSTED',
-        })
-        onClose()
-      } catch (err) {
-        setSubmitError(extractErrorMessage(err))
       }
+      await createTx.mutateAsync({
+        type:      txType,
+        assetId,
+        tradeDate,
+        quantity:  parseFloat(quantity),
+        unitPrice: parseFloat(unitPrice),
+        grossAmount,
+        fees:      parseFloat(fees) || undefined,
+        status:    'POSTED',
+      })
+      onClose()
+    } catch (err) {
+      setSubmitError(extractErrorMessage(err))
     }
   }
 
@@ -468,6 +405,8 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   const selectClass = `${inputBase} appearance-none`
   const labelClass  = 'block text-xs font-medium text-[var(--color-text-muted)] mb-1.5'
 
+  const isBuy = txType === 'BUY'
+
   return (
     <>
       {/* Overlay */}
@@ -481,8 +420,8 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
       {/* Drawer */}
       <div className={`
         fixed bottom-0 left-0 right-0 z-50
-        sm:left-auto sm:right-4 sm:bottom-4 sm:w-[400px]
-        flex flex-col
+        sm:left-auto sm:right-4 sm:bottom-4 sm:w-[420px]
+        flex flex-col max-h-[92dvh]
         bg-[var(--color-surface)] border border-[var(--color-border)]
         rounded-t-2xl sm:rounded-2xl
         shadow-[0_-8px_40px_oklch(0_0_0/0.3)]
@@ -490,342 +429,274 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
         ${open ? 'translate-y-0' : 'translate-y-full sm:translate-y-[calc(100%+2rem)]'}
       `}>
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-5 pb-4">
+        {/* Header fixo */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-              txType === 'BUY'
-                ? 'bg-emerald-500/15 text-emerald-400'
-                : 'bg-red-500/15 text-red-400'
+              isBuy ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
             }`}>
-              {txType === 'BUY'
+              {isBuy
                 ? <TrendingUp size={15} strokeWidth={2.5} />
                 : <TrendingDown size={15} strokeWidth={2.5} />}
             </div>
-            <div>
-              <p className="text-sm font-semibold leading-tight">Novo Lançamento</p>
-              <p className="text-xs text-[var(--color-text-muted)] leading-tight mt-0.5">
-                {stepConfig[step].label}
-              </p>
-            </div>
+            <p className="text-sm font-semibold">Novo Lançamento</p>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-[var(--color-text-faint)]">
-              {stepConfig[step].step}/4
-            </span>
-            <button
-              onClick={onClose}
-              aria-label="Fechar"
-              className="w-7 h-7 flex items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-offset)] transition-all"
-            >
-              <X size={15} />
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            aria-label="Fechar"
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-offset)] transition-all"
+          >
+            <X size={15} />
+          </button>
         </div>
 
-        {/* Progress */}
-        <div className="flex gap-1 px-5 pb-4">
-          {STEPS.map((s, i) => (
-            <div
-              key={s}
-              className={`h-0.5 flex-1 rounded-full transition-all duration-400 ${
-                i < stepIndex
-                  ? 'bg-[var(--color-primary)]'
-                  : i === stepIndex
-                    ? txType === 'BUY' ? 'bg-emerald-400' : 'bg-red-400'
-                    : 'bg-[var(--color-border)]'
-              }`}
-            />
-          ))}
-        </div>
+        <div className="h-px bg-[var(--color-border)] mx-5 flex-shrink-0" />
 
-        <div className="h-px bg-[var(--color-border)] mx-5" />
+        {/* Corpo com scroll */}
+        <div className="overflow-y-auto flex-1 px-5 py-5 space-y-5">
 
-        {/* Body */}
-        <div className="px-5 py-5 flex-1 min-h-[260px]">
-
-          {/* Step 1: Tipo */}
-          {step === 'type' && (
-            <div className="space-y-2.5">
-              <p className="text-xs text-[var(--color-text-muted)] mb-4">Selecione o tipo de operação</p>
+          {/* Toggle Compra / Venda */}
+          <div>
+            <label className={labelClass}>Tipo de operação</label>
+            <div className="grid grid-cols-2 gap-2">
               {(['BUY', 'SELL'] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTxType(t)}
                   className={`
-                    w-full flex items-center justify-between px-4 py-3 rounded-xl
+                    flex items-center justify-center gap-2 py-2.5 rounded-xl
                     border text-sm font-medium transition-all duration-150
                     ${
                       txType === t
                         ? t === 'BUY'
                           ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-400'
                           : 'border-red-500/60 bg-red-500/10 text-red-400'
-                        : 'border-[var(--color-border)] hover:border-[var(--color-primary-highlight)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                        : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-primary-highlight)]'
                     }
                   `}
                 >
-                  <div className="flex items-center gap-2.5">
-                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-                      txType === t
-                        ? t === 'BUY' ? 'bg-emerald-500/20' : 'bg-red-500/20'
-                        : 'bg-[var(--color-surface-offset)]'
-                    }`}>
-                      {t === 'BUY' ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-                    </div>
-                    <div className="text-left">
-                      <p className="font-semibold text-sm">{t === 'BUY' ? 'Compra' : 'Venda'}</p>
-                      <p className="text-xs opacity-70">{t === 'BUY' ? 'Adquirir ativo' : 'Desfazer posição'}</p>
-                    </div>
-                  </div>
-                  {txType === t && <CheckCircle2 size={15} />}
+                  {t === 'BUY'
+                    ? <TrendingUp size={13} />
+                    : <TrendingDown size={13} />}
+                  {t === 'BUY' ? 'Compra' : 'Venda'}
+                  {txType === t && <CheckCircle2 size={13} />}
                 </button>
               ))}
             </div>
-          )}
+          </div>
 
-          {/* Step 2: Ativo — Combobox com autocomplete */}
-          {step === 'asset' && (
-            <div className="space-y-4">
-              <div>
-                <label className={labelClass}>Ticker / Ativo</label>
-                <AssetCombobox
-                  value={tickerInput}
-                  onChange={(raw) => {
-                    setTickerInput(raw)
-                    // Reset estado se o usuário apagar e redigitar
-                    if (resolvedAsset && raw !== resolvedAsset.ticker) {
-                      setResolvedAsset(null)
-                      setSearchDone(false)
-                      setSearchedTicker('')
-                    }
-                  }}
-                  onSelect={handleSelectLocalAsset}
-                  onTriggerRemoteSearch={handleTriggerRemoteSearch}
-                  inputClass={inputBase}
-                  disabled={classesLoading}
-                />
-                {classesLoading && (
-                  <p className="text-xs text-[var(--color-text-faint)] mt-1.5 flex items-center gap-1">
-                    <Loader2 size={10} className="animate-spin" />
-                    Carregando classes de ativos…
+          {/* Ativo — combobox */}
+          <div>
+            <label className={labelClass}>Ativo</label>
+            <AssetCombobox
+              value={tickerInput}
+              onChange={(raw) => {
+                setTickerInput(raw)
+                if (resolvedAsset && raw !== resolvedAsset.ticker) {
+                  setResolvedAsset(null)
+                  setSearchDone(false)
+                  setSearchedTicker('')
+                }
+              }}
+              onSelect={handleSelectLocalAsset}
+              onTriggerRemoteSearch={handleTriggerRemoteSearch}
+              inputClass={inputBase}
+              disabled={classesLoading}
+            />
+
+            {/* Loading busca remota */}
+            {searchLoading && (
+              <p className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] mt-2">
+                <Loader2 size={12} className="animate-spin" />
+                Buscando {searchedTicker} no mercado…
+              </p>
+            )}
+
+            {/* Ativo encontrado */}
+            {resolvedAsset && !searchLoading && (
+              <div className="flex items-center gap-3 px-3.5 py-2.5 mt-2 bg-emerald-500/8 border border-emerald-500/25 rounded-xl">
+                <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold leading-tight">{resolvedAsset.ticker}</p>
+                  <p className="text-xs text-[var(--color-text-muted)] truncate mt-0.5">
+                    {resolvedAsset.name}
+                    {resolvedAsset.assetClass?.name && (
+                      <span className="text-[var(--color-text-faint)]"> · {resolvedAsset.assetClass.name}</span>
+                    )}
                   </p>
-                )}
+                </div>
               </div>
+            )}
 
-              {/* Loading busca remota */}
-              {searchLoading && (
-                <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                  <Loader2 size={13} className="animate-spin" />
-                  Buscando {searchedTicker} no mercado…
+            {/* Ativo novo — campos extras */}
+            {isNewAsset && !searchLoading && (
+              <div className="mt-3 space-y-3">
+                <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${
+                  backendQuote?.name
+                    ? 'bg-[var(--color-primary-highlight)] text-[var(--color-primary)]'
+                    : 'bg-amber-500/10 text-amber-400'
+                }`}>
+                  {backendQuote?.name
+                    ? <><Sparkles size={11} /><span>Nome sugerido — confirme os dados</span></>
+                    : <><AlertCircle size={11} /><span>Ativo não encontrado. Preencha manualmente.</span></>}
                 </div>
-              )}
 
-              {/* Ativo encontrado no banco */}
-              {resolvedAsset && !isNewAsset && !searchLoading && (
-                <div className="flex items-center gap-3 px-3.5 py-3 bg-emerald-500/8 border border-emerald-500/25 rounded-xl">
-                  <CheckCircle2 size={15} className="text-emerald-400 flex-shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold leading-tight">{resolvedAsset.ticker}</p>
-                    <p className="text-xs text-[var(--color-text-muted)] truncate mt-0.5">
-                      {resolvedAsset.name}
-                      {resolvedAsset.assetClass?.name && (
-                        <span className="text-[var(--color-text-faint)]"> · {resolvedAsset.assetClass.name}</span>
-                      )}
-                    </p>
-                  </div>
+                <div>
+                  <label className={labelClass}>Nome do ativo *</label>
+                  <textarea
+                    value={newAssetName}
+                    onChange={(e) => setNewAssetName(e.target.value)}
+                    placeholder="Ex: Tesouro IPCA+ 2035"
+                    rows={2}
+                    className={[inputBase, 'resize-none leading-snug'].join(' ')}
+                  />
                 </div>
-              )}
 
-              {/* Ativo novo — preenchimento manual */}
-              {isNewAsset && !searchLoading && (
-                <div className="space-y-3">
-                  <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${
-                    backendQuote?.name
-                      ? 'bg-[var(--color-primary-highlight)] text-[var(--color-primary)]'
-                      : 'bg-amber-500/10 text-amber-400'
-                  }`}>
-                    {backendQuote?.name
-                      ? <><Sparkles size={11} /> <span>Nome sugerido — confirme os dados</span></>
-                      : <><AlertCircle size={11} /> <span>Ativo não encontrado. Preencha manualmente.</span></>}
-                  </div>
-
-                  <div>
-                    <label className={labelClass}>Nome do ativo *</label>
-                    <textarea
-                      value={newAssetName}
-                      onChange={(e) => setNewAssetName(e.target.value)}
-                      placeholder="Ex: Tesouro IPCA+ 2035"
-                      rows={2}
-                      className={[inputBase, 'resize-none leading-snug'].join(' ')}
-                    />
-                  </div>
-
-                  <div>
-                    <label className={labelClass}>
-                      Classe de ativo *
-                      {selectedClassId && backendQuote?.inferredClass && (
-                        <span className="ml-1.5 text-[var(--color-primary)] font-normal opacity-70">(sugerida)</span>
-                      )}
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={selectedClassId}
-                        onChange={(e) => setSelectedClassId(e.target.value)}
-                        style={{
-                          colorScheme: 'dark',
-                          color: 'var(--color-text)',
-                          backgroundColor: 'var(--color-surface-offset)',
-                        }}
-                        className={selectClass}
-                      >
-                        <option value="" style={{ color: 'var(--color-text-faint)', backgroundColor: 'var(--color-surface-offset)' }}>
-                          Selecione a classe
+                <div>
+                  <label className={labelClass}>
+                    Classe de ativo *
+                    {selectedClassId && backendQuote?.inferredClass && (
+                      <span className="ml-1.5 text-[var(--color-primary)] font-normal opacity-70">(sugerida)</span>
+                    )}
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={selectedClassId}
+                      onChange={(e) => setSelectedClassId(e.target.value)}
+                      style={{
+                        colorScheme: 'dark',
+                        color: 'var(--color-text)',
+                        backgroundColor: 'var(--color-surface-offset)',
+                      }}
+                      className={selectClass}
+                    >
+                      <option value="" style={{ color: 'var(--color-text-faint)', backgroundColor: 'var(--color-surface-offset)' }}>
+                        Selecione a classe
+                      </option>
+                      {sortedClasses.map((c) => (
+                        <option key={c.id} value={c.id} style={{ color: 'var(--color-text)', backgroundColor: 'var(--color-surface-offset)' }}>
+                          {c.name}
                         </option>
-                        {sortedClasses.map((c) => (
-                          <option key={c.id} value={c.id} style={{ color: 'var(--color-text)', backgroundColor: 'var(--color-surface-offset)' }}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]">
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Step 3: Detalhes */}
-          {step === 'details' && (
-            <div className="space-y-4">
-              <div>
-                <label className={labelClass}>Data do negócio</label>
-                <input type="date" value={tradeDate}
-                  onChange={(e) => setTradeDate(e.target.value)}
-                  className={inputBase} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelClass}>Quantidade</label>
-                  <input type="number" min="0" step="1" value={quantity}
-                    onChange={(e) => setQuantity(e.target.value)}
-                    placeholder="0" className={`${inputBase} tabular-nums`} />
-                </div>
-                <div>
-                  <label className={labelClass}>Preço unitário</label>
-                  <input type="number" min="0" step="0.01" value={unitPrice}
-                    onChange={(e) => setUnitPrice(e.target.value)}
-                    placeholder="0,00" className={`${inputBase} tabular-nums`} />
-                </div>
-              </div>
-              <div>
-                <label className={labelClass}>Taxas (R$)</label>
-                <input type="number" min="0" step="0.01" value={fees}
-                  onChange={(e) => setFees(e.target.value)}
-                  className={`${inputBase} tabular-nums`} />
-              </div>
-
-              {grossAmount > 0 && (
-                <div className="bg-[var(--color-surface-offset)] rounded-xl p-3.5 space-y-1.5">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-[var(--color-text-muted)]">Valor bruto</span>
-                    <span className="text-xs tabular-nums text-[var(--color-text-muted)]">{fmt.currency(grossAmount)}</span>
-                  </div>
-                  {parseFloat(fees) > 0 && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-[var(--color-text-muted)]">Taxas</span>
-                      <span className="text-xs tabular-nums text-[var(--color-text-muted)]">{fmt.currency(parseFloat(fees))}</span>
-                    </div>
-                  )}
-                  <div className="h-px bg-[var(--color-border)] my-1" />
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-semibold">Total</span>
-                    <span className={`text-sm font-semibold tabular-nums ${
-                      txType === 'BUY' ? 'text-red-400' : 'text-emerald-400'
-                    }`}>
-                      {txType === 'BUY' ? '-' : '+'}{fmt.currency(netAmount)}
+                      ))}
+                    </select>
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]">
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
                     </span>
                   </div>
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* Data */}
+          <div>
+            <label className={labelClass}>Data do negócio</label>
+            <input
+              type="date"
+              value={tradeDate}
+              onChange={(e) => setTradeDate(e.target.value)}
+              className={inputBase}
+            />
+          </div>
+
+          {/* Quantidade + Preço */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>Quantidade</label>
+              <input
+                type="number" min="0" step="1"
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                placeholder="0"
+                className={`${inputBase} tabular-nums`}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Preço unitário (R$)</label>
+              <input
+                type="number" min="0" step="0.01"
+                value={unitPrice}
+                onChange={(e) => setUnitPrice(e.target.value)}
+                placeholder="0,00"
+                className={`${inputBase} tabular-nums`}
+              />
+            </div>
+          </div>
+
+          {/* Taxas */}
+          <div>
+            <label className={labelClass}>Taxas (R$)</label>
+            <input
+              type="number" min="0" step="0.01"
+              value={fees}
+              onChange={(e) => setFees(e.target.value)}
+              className={`${inputBase} tabular-nums`}
+            />
+          </div>
+
+          {/* Resumo em tempo real */}
+          {grossAmount > 0 && (
+            <div className="bg-[var(--color-surface-offset)] rounded-xl p-4 space-y-2">
+              <div className="flex justify-between text-xs text-[var(--color-text-muted)]">
+                <span>Valor bruto</span>
+                <span className="tabular-nums">{fmt.currency(grossAmount)}</span>
+              </div>
+              {parseFloat(fees) > 0 && (
+                <div className="flex justify-between text-xs text-[var(--color-text-muted)]">
+                  <span>Taxas</span>
+                  <span className="tabular-nums">{fmt.currency(parseFloat(fees))}</span>
+                </div>
               )}
+              <div className="h-px bg-[var(--color-border)]" />
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-semibold">Total</span>
+                <span className={`text-sm font-semibold tabular-nums ${
+                  isBuy ? 'text-red-400' : 'text-emerald-400'
+                }`}>
+                  {isBuy ? '-' : '+'}{fmt.currency(netAmount)}
+                </span>
+              </div>
             </div>
           )}
 
-          {/* Step 4: Confirmar */}
-          {step === 'confirm' && (
-            <div className="space-y-1">
-              <p className="text-xs text-[var(--color-text-muted)] mb-3">Revise os dados antes de confirmar</p>
-
-              <div className="bg-[var(--color-surface-offset)] rounded-xl divide-y divide-[var(--color-border)]">
-                {[
-                  { label: 'Operação',    value: txType === 'BUY' ? 'Compra' : 'Venda',
-                    accent: txType === 'BUY' ? 'text-emerald-400' : 'text-red-400' },
-                  { label: 'Ativo',       value: searchedTicker,                         accent: 'font-semibold' },
-                  { label: 'Nome',        value: resolvedAsset?.name ?? newAssetName,     accent: '' },
-                  { label: 'Classe',      value: resolvedAsset?.assetClass?.name ?? selectedClassName, accent: '' },
-                  { label: 'Data',        value: fmt.date(tradeDate),                    accent: '' },
-                  { label: 'Quantidade',  value: fmt.number(parseFloat(quantity) || 0, 0), accent: 'tabular-nums' },
-                  { label: 'Preço unit.', value: fmt.currency(parseFloat(unitPrice) || 0), accent: 'tabular-nums' },
-                  { label: 'Taxas',       value: fmt.currency(parseFloat(fees) || 0),    accent: 'tabular-nums' },
-                  { label: 'Total',       value: fmt.currency(netAmount),
-                    accent: `tabular-nums font-semibold ${txType === 'BUY' ? 'text-red-400' : 'text-emerald-400'}` },
-                ].map(({ label, value, accent }) => (
-                  <div key={label} className="flex justify-between items-start gap-3 px-3.5 py-2.5">
-                    <span className="text-xs text-[var(--color-text-muted)] flex-shrink-0">{label}</span>
-                    <span className={`text-xs text-right break-words min-w-0 ${accent}`}>{value}</span>
-                  </div>
-                ))}
-              </div>
-
-              {submitError && (
-                <div className="flex items-start gap-2 px-3 py-2.5 mt-3 bg-red-500/10 border border-red-500/25 rounded-lg">
-                  <AlertCircle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-red-400 leading-relaxed">{submitError}</p>
-                </div>
-              )}
+          {/* Erro de submit */}
+          {submitError && (
+            <div className="flex items-start gap-2 px-3 py-2.5 bg-red-500/10 border border-red-500/25 rounded-lg">
+              <AlertCircle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-red-400 leading-relaxed">{submitError}</p>
             </div>
           )}
         </div>
 
-        {/* Footer */}
-        <div className="h-px bg-[var(--color-border)] mx-5" />
-        <div className="px-5 py-4 flex gap-2.5">
-          {step !== 'type' && (
+        {/* Footer fixo */}
+        <div className="flex-shrink-0">
+          <div className="h-px bg-[var(--color-border)] mx-5" />
+          <div className="px-5 py-4">
             <button
-              onClick={() => setStep(STEPS[stepIndex - 1])}
-              disabled={isSubmitting}
-              className="flex-1 py-2.5 rounded-xl border border-[var(--color-border)] text-sm font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-offset)] transition-all disabled:opacity-40"
+              onClick={handleSubmit}
+              disabled={!canSubmit() || isSubmitting}
+              className={`
+                w-full flex items-center justify-center gap-2
+                py-3 rounded-xl text-sm font-semibold
+                transition-all disabled:opacity-40 disabled:cursor-not-allowed
+                ${
+                  isBuy
+                    ? 'bg-emerald-500 hover:bg-emerald-600 text-white'
+                    : 'bg-red-500 hover:bg-red-600 text-white'
+                }
+              `}
             >
-              Voltar
+              {isSubmitting ? (
+                <><Loader2 size={15} className="animate-spin" /> Salvando…</>
+              ) : (
+                <>{isBuy ? <TrendingUp size={15} /> : <TrendingDown size={15} />}
+                  {isBuy ? 'Confirmar Compra' : 'Confirmar Venda'}
+                </>
+              )}
             </button>
-          )}
-          <button
-            onClick={handleNext}
-            disabled={
-              (step === 'asset'   && !canProceedAsset())   ||
-              (step === 'details' && !canProceedDetails()) ||
-              isSubmitting
-            }
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
-              step === 'confirm'
-                ? txType === 'BUY'
-                  ? 'bg-emerald-500 hover:bg-emerald-600 text-white'
-                  : 'bg-red-500 hover:bg-red-600 text-white'
-                : 'bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white'
-            }`}
-          >
-            {isSubmitting ? (
-              <><Loader2 size={14} className="animate-spin" /> Salvando...</>
-            ) : step === 'confirm' ? (
-              <>{txType === 'BUY' ? 'Confirmar Compra' : 'Confirmar Venda'}</>
-            ) : (
-              <>Próximo <ChevronRight size={14} /></>
-            )}
-          </button>
+          </div>
         </div>
       </div>
     </>
