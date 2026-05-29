@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   X, Search, ChevronRight, CheckCircle2, Loader2,
-  AlertCircle, Sparkles,
+  AlertCircle, Sparkles, TrendingUp, TrendingDown,
 } from 'lucide-react'
 import { fmt } from '@/lib/utils'
 import { api } from '@/lib/api'
@@ -23,10 +23,9 @@ interface Props {
   onClose: () => void
 }
 
-// Resposta do proxy backend GET /assets/quote/:ticker
 interface BackendQuote {
   name:          string | null
-  inferredClass: string | null   // sugestão da API — usada apenas para pré-selecionar o <select>
+  inferredClass: string | null
   symbol?:       string
   quoteType?:    string
   exchDisp?:     string
@@ -41,11 +40,11 @@ async function fetchQuoteFromBackend(ticker: string): Promise<BackendQuote | nul
   }
 }
 
-// Mapa: nome da classe (como vem do banco) → assetType usado no create
+// Mapa: nome da classe (como vem do banco) → assetType
 // Valores DEVEM bater com o enum AssetType do Prisma:
-//   STOCK | FII | ETF | BDR | CRYPTO | BOND | FUND | CASH | OTHER
+// STOCK | FII | ETF | BDR | CRYPTO | BOND | FUND | CASH | OTHER
 const CLASS_NAME_TO_ASSET_TYPE: Record<string, string> = {
-  'Fundo Imobiliário':    'FII',      // era 'REIT' — não existe no enum
+  'Fundo Imobiliário':    'FII',
   'ETF Nacional':         'ETF',
   'ETF Internacional':    'ETF',
   'Ação Nacional':        'STOCK',
@@ -58,24 +57,34 @@ const CLASS_NAME_TO_ASSET_TYPE: Record<string, string> = {
   'Caixa':                'CASH',
 }
 
+// Extrai mensagem legível de erros Axios/API
+function extractErrorMessage(error: unknown): string {
+  if (!error) return 'Erro desconhecido.'
+  const err = error as {
+    response?: { data?: { message?: string; error?: string }; status?: number }
+    message?: string
+  }
+  const data = err?.response?.data
+  if (data?.message) return data.message
+  if (data?.error)   return data.error
+  if (err?.message)  return err.message
+  return 'Erro ao salvar. Tente novamente.'
+}
+
 export function NewTransactionDrawer({ open, onClose }: Props) {
-  const [step, setStep]         = useState<Step>('type')
-  const [txType, setTxType]     = useState<'BUY' | 'SELL'>('BUY')
+  const [step, setStep]     = useState<Step>('type')
+  const [txType, setTxType] = useState<'BUY' | 'SELL'>('BUY')
 
-  // Ativo
-  const [tickerInput, setTickerInput]         = useState('')
-  const [searchedTicker, setSearchedTicker]   = useState('')
-  const [resolvedAsset, setResolvedAsset]     = useState<Asset | null>(null)
-  const [backendQuote, setBackendQuote]       = useState<BackendQuote | null>(null)
-  const [searchLoading, setSearchLoading]     = useState(false)
-  const [searchDone, setSearchDone]           = useState(false)
+  const [tickerInput, setTickerInput]       = useState('')
+  const [searchedTicker, setSearchedTicker] = useState('')
+  const [resolvedAsset, setResolvedAsset]   = useState<Asset | null>(null)
+  const [backendQuote, setBackendQuote]     = useState<BackendQuote | null>(null)
+  const [searchLoading, setSearchLoading]   = useState(false)
+  const [searchDone, setSearchDone]         = useState(false)
 
-  // Dados para cadastro de novo ativo
   const [newAssetName, setNewAssetName]       = useState('')
-  // selectedClassId: sempre escolhido manualmente; pré-populado com a sugestão da API quando disponível
   const [selectedClassId, setSelectedClassId] = useState('')
 
-  // Detalhes da transação
   const [tradeDate, setTradeDate] = useState(() => new Date().toISOString().split('T')[0])
   const [quantity, setQuantity]   = useState('')
   const [unitPrice, setUnitPrice] = useState('')
@@ -91,13 +100,11 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   const netAmount   = grossAmount + (parseFloat(fees) || 0)
   const isNewAsset  = searchDone && assetQuery.isFetched && assetQuery.data === null
 
-  // Nome da classe selecionada — usado para derivar o assetType no submit
   const selectedClassName = (assetClasses.data ?? []).find(
     (c: AssetClass) => c.id === selectedClassId,
   )?.name ?? ''
   const inferredAssetType = CLASS_NAME_TO_ASSET_TYPE[selectedClassName] ?? 'OTHER'
 
-  // Reset ao fechar
   useEffect(() => {
     if (!open) {
       setTimeout(() => {
@@ -111,13 +118,11 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     }
   }, [open])
 
-  // Quando asset é encontrado no banco local
   useEffect(() => {
     if (assetQuery.data) setResolvedAsset(assetQuery.data)
     else                 setResolvedAsset(null)
   }, [assetQuery.data])
 
-  // Busca: chama o proxy do backend
   const runSearch = useCallback(async (ticker: string) => {
     setSearchLoading(true)
     setSearchDone(false)
@@ -125,15 +130,10 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     setNewAssetName('')
     setSelectedClassId('')
     setUnitPrice('')
-
     try {
       const quote = await fetchQuoteFromBackend(ticker)
       setBackendQuote(quote)
-
-      // Preenche nome se a API retornou
       if (quote?.name) setNewAssetName(quote.name)
-
-      // Pré-seleciona a classe sugerida pela API (usuário ainda pode alterar)
       if (quote?.inferredClass) {
         const matched = (assetClasses.data ?? []).find(
           (c: AssetClass) => c.name === quote.inferredClass,
@@ -172,11 +172,14 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
 
   const STEPS: Step[] = ['type', 'asset', 'details', 'confirm']
   const stepIndex = STEPS.indexOf(step)
-  const stepLabel: Record<Step, string> = {
-    type: 'Tipo de operação', asset: 'Ativo',
-    details: 'Detalhes', confirm: 'Confirmar',
-  }
   const isSubmitting = createAsset.isPending || createTx.isPending
+
+  const stepConfig = {
+    type:    { label: 'Tipo de operação', step: 1 },
+    asset:   { label: 'Ativo',              step: 2 },
+    details: { label: 'Detalhes',           step: 3 },
+    confirm: { label: 'Confirmar',          step: 4 },
+  }
 
   const handleNext = async () => {
     if (step === 'type')    { setStep('asset');   return }
@@ -207,17 +210,28 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
           status:      'POSTED',
         })
         onClose()
-      } catch {
-        setSubmitError('Erro ao salvar. Verifique os dados e tente novamente.')
+      } catch (err) {
+        setSubmitError(extractErrorMessage(err))
       }
     }
   }
+
+  // ── Estilos reutilizáveis ─────────────────────────────────────────────────
+  const inputClass = [
+    'w-full rounded-lg px-3 py-2 text-sm',
+    'bg-[var(--color-surface-offset)] border border-[var(--color-border)]',
+    'placeholder:text-[var(--color-text-faint)] text-[var(--color-text)]',
+    'focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-transparent',
+    'transition-all duration-150',
+  ].join(' ')
+
+  const labelClass = 'block text-xs font-medium text-[var(--color-text-muted)] mb-1.5'
 
   return (
     <>
       {/* Overlay */}
       <div
-        className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-200 ${
+        className={`fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] transition-opacity duration-200 ${
           open ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
         onClick={onClose}
@@ -226,59 +240,106 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
       {/* Drawer */}
       <div className={`
         fixed bottom-0 left-0 right-0 z-50
-        sm:left-auto sm:right-4 sm:bottom-4 sm:w-[420px]
+        sm:left-auto sm:right-4 sm:bottom-4 sm:w-[400px]
+        flex flex-col
         bg-[var(--color-surface)] border border-[var(--color-border)]
-        rounded-t-2xl sm:rounded-2xl shadow-2xl
+        rounded-t-2xl sm:rounded-2xl
+        shadow-[0_-8px_40px_oklch(0_0_0/0.3)]
         transform transition-transform duration-300 ease-out
         ${open ? 'translate-y-0' : 'translate-y-full sm:translate-y-[calc(100%+2rem)]'}
       `}>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border-subtle)]">
-          <div>
-            <p className="text-sm font-semibold">Novo Lançamento</p>
-            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{stepLabel[step]}</p>
+        <div className="flex items-center justify-between px-5 pt-5 pb-4">
+          <div className="flex items-center gap-3">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+              txType === 'BUY'
+                ? 'bg-emerald-500/15 text-emerald-400'
+                : 'bg-red-500/15 text-red-400'
+            }`}>
+              {txType === 'BUY'
+                ? <TrendingUp size={15} strokeWidth={2.5} />
+                : <TrendingDown size={15} strokeWidth={2.5} />}
+            </div>
+            <div>
+              <p className="text-sm font-semibold leading-tight">Novo Lançamento</p>
+              <p className="text-xs text-[var(--color-text-muted)] leading-tight mt-0.5">
+                {stepConfig[step].label}
+              </p>
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-[var(--color-surface-offset)] transition-colors"
-          >
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-[var(--color-text-faint)]">
+              {stepConfig[step].step}/4
+            </span>
+            <button
+              onClick={onClose}
+              aria-label="Fechar"
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-offset)] transition-all"
+            >
+              <X size={15} />
+            </button>
+          </div>
         </div>
 
         {/* Progress */}
-        <div className="flex gap-1 px-5 pt-3">
+        <div className="flex gap-1 px-5 pb-4">
           {STEPS.map((s, i) => (
-            <div key={s} className={`h-1 flex-1 rounded-full transition-colors duration-300 ${
-              i <= stepIndex ? 'bg-[var(--color-primary)]' : 'bg-[var(--color-border)]'
-            }`} />
+            <div
+              key={s}
+              className={`h-0.5 flex-1 rounded-full transition-all duration-400 ${
+                i < stepIndex
+                  ? 'bg-[var(--color-primary)]'
+                  : i === stepIndex
+                    ? txType === 'BUY' ? 'bg-emerald-400' : 'bg-red-400'
+                    : 'bg-[var(--color-border)]'
+              }`}
+            />
           ))}
         </div>
 
+        {/* Divisor */}
+        <div className="h-px bg-[var(--color-border)] mx-5" />
+
         {/* Body */}
-        <div className="px-5 py-5 min-h-[280px]">
+        <div className="px-5 py-5 flex-1 min-h-[260px]">
 
           {/* Step 1: Tipo */}
           {step === 'type' && (
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               <p className="text-xs text-[var(--color-text-muted)] mb-4">Selecione o tipo de operação</p>
               {(['BUY', 'SELL'] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTxType(t)}
                   className={`
-                    w-full flex items-center justify-between px-4 py-3.5 rounded-xl border-2 text-sm font-medium transition-all
-                    ${txType === t
-                      ? t === 'BUY'
-                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
-                        : 'border-red-500 bg-red-500/10 text-red-400'
-                      : 'border-[var(--color-border)] hover:border-[var(--color-border-subtle)] text-[var(--color-text-muted)]'
+                    w-full flex items-center justify-between px-4 py-3 rounded-xl
+                    border text-sm font-medium transition-all duration-150
+                    ${
+                      txType === t
+                        ? t === 'BUY'
+                          ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-400'
+                          : 'border-red-500/60 bg-red-500/10 text-red-400'
+                        : 'border-[var(--color-border)] hover:border-[var(--color-border-subtle,var(--color-primary-highlight))] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
                     }
                   `}
                 >
-                  <span>{t === 'BUY' ? '↑ Compra (BUY)' : '↓ Venda (SELL)'}</span>
-                  {txType === t && <CheckCircle2 size={16} />}
+                  <div className="flex items-center gap-2.5">
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                      txType === t
+                        ? t === 'BUY' ? 'bg-emerald-500/20' : 'bg-red-500/20'
+                        : 'bg-[var(--color-surface-offset)]'
+                    }`}>
+                      {t === 'BUY'
+                        ? <TrendingUp size={13} />
+                        : <TrendingDown size={13} />}
+                    </div>
+                    <div className="text-left">
+                      <p className="font-semibold text-sm">{t === 'BUY' ? 'Compra' : 'Venda'}</p>
+                      <p className="text-xs opacity-70">{t === 'BUY' ? 'Adquirir ativo' : 'Desfazer posição'}</p>
+                    </div>
+                  </div>
+                  {txType === t && <CheckCircle2 size={15} />}
                 </button>
               ))}
             </div>
@@ -287,85 +348,70 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
           {/* Step 2: Ativo */}
           {step === 'asset' && (
             <div className="space-y-4">
-              {/* Campo de busca */}
               <div>
-                <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Ticker</label>
+                <label className={labelClass}>Ticker</label>
                 <div className="flex gap-2">
                   <input
                     value={tickerInput}
                     onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
                     onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                    placeholder="Ex: PETR4, MXRF11, TESOURO-SELIC-2029"
+                    placeholder="Ex: PETR4, MXRF11"
                     maxLength={30}
-                    className="flex-1 bg-[var(--color-surface-offset)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] placeholder:text-[var(--color-text-faint)]"
+                    className={inputClass}
                   />
                   <button
                     onClick={handleSearch}
                     disabled={tickerInput.trim().length < 2}
-                    className="px-3 py-2 bg-[var(--color-primary)] text-white rounded-lg text-sm hover:bg-[var(--color-primary-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="px-3 py-2 bg-[var(--color-primary)] text-white rounded-lg text-sm hover:bg-[var(--color-primary-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                   >
-                    {(searchLoading || assetQuery.isLoading) ? (
-                      <Loader2 size={15} className="animate-spin" />
-                    ) : (
-                      <Search size={15} />
-                    )}
+                    {(searchLoading || assetQuery.isLoading)
+                      ? <Loader2 size={15} className="animate-spin" />
+                      : <Search size={15} />}
                   </button>
                 </div>
               </div>
 
-              {/* Ativo já existe no banco */}
               {resolvedAsset && !isNewAsset && (
-                <div className="flex items-start gap-3 px-3 py-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
-                  <CheckCircle2 size={16} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+                <div className="flex items-center gap-3 px-3.5 py-3 bg-emerald-500/8 border border-emerald-500/25 rounded-xl">
+                  <CheckCircle2 size={15} className="text-emerald-400 flex-shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{resolvedAsset.ticker}</p>
-                    <p className="text-xs text-[var(--color-text-muted)] truncate">{resolvedAsset.name}</p>
-                    <p className="text-xs text-[var(--color-text-faint)]">{resolvedAsset.assetClass?.name}</p>
+                    <p className="text-sm font-semibold leading-tight">{resolvedAsset.ticker}</p>
+                    <p className="text-xs text-[var(--color-text-muted)] truncate mt-0.5">
+                      {resolvedAsset.name}
+                      {resolvedAsset.assetClass?.name && (
+                        <span className="text-[var(--color-text-faint)]"> · {resolvedAsset.assetClass.name}</span>
+                      )}
+                    </p>
                   </div>
                 </div>
               )}
 
-              {/* Novo ativo — formulário de cadastro */}
               {isNewAsset && (
                 <div className="space-y-3">
-                  {/* Banner de status da busca */}
-                  <div className={`flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg ${
+                  <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${
                     backendQuote?.name
                       ? 'bg-[var(--color-primary-highlight)] text-[var(--color-primary)]'
                       : 'bg-amber-500/10 text-amber-400'
                   }`}>
-                    {backendQuote?.name ? (
-                      <><Sparkles size={12} /> Nome coletado — confirme os dados abaixo</>
-                    ) : (
-                      <><AlertCircle size={12} /> Ativo não encontrado na API. Preencha manualmente.</>
-                    )}
+                    {backendQuote?.name
+                      ? <><Sparkles size={11} /> <span>Nome sugerido — confirme os dados</span></>
+                      : <><AlertCircle size={11} /> <span>Ativo não encontrado. Preencha manualmente.</span></>}
                   </div>
-
-                  {/* Nome — coletado pela API, editável pelo usuário */}
                   <div>
-                    <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Nome do ativo *</label>
-                    <input
-                      value={newAssetName}
-                      onChange={(e) => setNewAssetName(e.target.value)}
-                      placeholder="Ex: Maxi Renda FII"
-                      className="w-full bg-[var(--color-surface-offset)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] placeholder:text-[var(--color-text-faint)]"
-                    />
+                    <label className={labelClass}>Nome do ativo *</label>
+                    <input value={newAssetName} onChange={(e) => setNewAssetName(e.target.value)}
+                      placeholder="Ex: Maxi Renda FII" className={inputClass} />
                   </div>
-
-                  {/* Classe — SEMPRE seleção manual; pré-selecionada pela sugestão da API quando disponível */}
                   <div>
-                    <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">
+                    <label className={labelClass}>
                       Classe de ativo *
                       {selectedClassId && backendQuote?.inferredClass && (
-                        <span className="ml-1.5 text-[var(--color-primary)] opacity-70">(sugerida pela API)</span>
+                        <span className="ml-1.5 text-[var(--color-primary)] font-normal opacity-70">(sugerida)</span>
                       )}
                     </label>
-                    <select
-                      value={selectedClassId}
-                      onChange={(e) => setSelectedClassId(e.target.value)}
+                    <select value={selectedClassId} onChange={(e) => setSelectedClassId(e.target.value)}
                       style={{ colorScheme: 'dark' }}
-                      className="w-full bg-[var(--color-surface-offset)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-                    >
+                      className={inputClass}>
                       <option value="">Selecione a classe</option>
                       {sortedClasses.map((c) => (
                         <option key={c.id} value={c.id}>{c.name}</option>
@@ -381,50 +427,48 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
           {step === 'details' && (
             <div className="space-y-4">
               <div>
-                <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Data do negócio</label>
-                <input
-                  type="date" value={tradeDate}
+                <label className={labelClass}>Data do negócio</label>
+                <input type="date" value={tradeDate}
                   onChange={(e) => setTradeDate(e.target.value)}
-                  className="w-full bg-[var(--color-surface-offset)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-                />
+                  className={inputClass} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Quantidade</label>
-                  <input
-                    type="number" min="0" step="1" value={quantity}
+                  <label className={labelClass}>Quantidade</label>
+                  <input type="number" min="0" step="1" value={quantity}
                     onChange={(e) => setQuantity(e.target.value)}
-                    placeholder="0"
-                    className="w-full bg-[var(--color-surface-offset)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] placeholder:text-[var(--color-text-faint)] tabular-nums"
-                  />
+                    placeholder="0" className={`${inputClass} tabular-nums`} />
                 </div>
                 <div>
-                  <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Preço unitário</label>
-                  <input
-                    type="number" min="0" step="0.01" value={unitPrice}
+                  <label className={labelClass}>Preço unitário</label>
+                  <input type="number" min="0" step="0.01" value={unitPrice}
                     onChange={(e) => setUnitPrice(e.target.value)}
-                    placeholder="0,00"
-                    className="w-full bg-[var(--color-surface-offset)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] placeholder:text-[var(--color-text-faint)] tabular-nums"
-                  />
+                    placeholder="0,00" className={`${inputClass} tabular-nums`} />
                 </div>
               </div>
               <div>
-                <label className="block text-xs text-[var(--color-text-muted)] mb-1.5">Taxas / Corretagem (R$)</label>
-                <input
-                  type="number" min="0" step="0.01" value={fees}
+                <label className={labelClass}>Taxas (R$)</label>
+                <input type="number" min="0" step="0.01" value={fees}
                   onChange={(e) => setFees(e.target.value)}
-                  className="w-full bg-[var(--color-surface-offset)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] tabular-nums"
-                />
+                  className={`${inputClass} tabular-nums`} />
               </div>
+
               {grossAmount > 0 && (
-                <div className="px-4 py-3 bg-[var(--color-surface-offset)] rounded-xl">
-                  <div className="flex justify-between text-xs text-[var(--color-text-muted)] mb-1">
-                    <span>Valor bruto</span>
-                    <span className="tabular-nums">{fmt.currency(grossAmount)}</span>
+                <div className="bg-[var(--color-surface-offset)] rounded-xl p-3.5 space-y-1.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-[var(--color-text-muted)]">Valor bruto</span>
+                    <span className="text-xs tabular-nums text-[var(--color-text-muted)]">{fmt.currency(grossAmount)}</span>
                   </div>
-                  <div className="flex justify-between text-sm font-semibold">
-                    <span>Total</span>
-                    <span className={`tabular-nums ${
+                  {parseFloat(fees) > 0 && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-[var(--color-text-muted)]">Taxas</span>
+                      <span className="text-xs tabular-nums text-[var(--color-text-muted)]">{fmt.currency(parseFloat(fees))}</span>
+                    </div>
+                  )}
+                  <div className="h-px bg-[var(--color-border)] my-1" />
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-semibold">Total</span>
+                    <span className={`text-sm font-semibold tabular-nums ${
                       txType === 'BUY' ? 'text-red-400' : 'text-emerald-400'
                     }`}>
                       {txType === 'BUY' ? '-' : '+'}{fmt.currency(netAmount)}
@@ -437,39 +481,48 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
 
           {/* Step 4: Confirmar */}
           {step === 'confirm' && (
-            <div className="space-y-3">
-              <p className="text-xs text-[var(--color-text-muted)] mb-4">Revise os dados antes de confirmar</p>
-              {[
-                { label: 'Operação',    value: txType === 'BUY' ? '↑ Compra' : '↓ Venda'                   },
-                { label: 'Ativo',       value: `${searchedTicker} — ${resolvedAsset?.name ?? newAssetName}`  },
-                { label: 'Classe',      value: resolvedAsset?.assetClass?.name ?? selectedClassName           },
-                { label: 'Data',        value: fmt.date(tradeDate)                                           },
-                { label: 'Quantidade',  value: fmt.number(parseFloat(quantity) || 0, 0)                     },
-                { label: 'Preço unit.', value: fmt.currency(parseFloat(unitPrice) || 0)                     },
-                { label: 'Taxas',       value: fmt.currency(parseFloat(fees) || 0)                          },
-                { label: 'Total',       value: fmt.currency(netAmount)                                      },
-              ].map(({ label, value }) => (
-                <div key={label} className="flex justify-between text-sm">
-                  <span className="text-[var(--color-text-muted)]">{label}</span>
-                  <span className="font-medium tabular-nums text-right max-w-[60%] truncate">{value}</span>
-                </div>
-              ))}
+            <div className="space-y-1">
+              <p className="text-xs text-[var(--color-text-muted)] mb-3">Revise os dados antes de confirmar</p>
+
+              <div className="bg-[var(--color-surface-offset)] rounded-xl divide-y divide-[var(--color-border)]">
+                {[
+                  { label: 'Operação',    value: txType === 'BUY' ? 'Compra'   : 'Venda',
+                    accent: txType === 'BUY' ? 'text-emerald-400' : 'text-red-400' },
+                  { label: 'Ativo',       value: searchedTicker,                  accent: 'font-semibold' },
+                  { label: 'Nome',        value: resolvedAsset?.name ?? newAssetName,  accent: '' },
+                  { label: 'Classe',      value: resolvedAsset?.assetClass?.name ?? selectedClassName, accent: '' },
+                  { label: 'Data',        value: fmt.date(tradeDate),             accent: '' },
+                  { label: 'Quantidade',  value: fmt.number(parseFloat(quantity) || 0, 0), accent: 'tabular-nums' },
+                  { label: 'Preço unit.', value: fmt.currency(parseFloat(unitPrice) || 0), accent: 'tabular-nums' },
+                  { label: 'Taxas',       value: fmt.currency(parseFloat(fees) || 0),     accent: 'tabular-nums' },
+                  { label: 'Total',       value: fmt.currency(netAmount),
+                    accent: `tabular-nums font-semibold ${txType === 'BUY' ? 'text-red-400' : 'text-emerald-400'}` },
+                ].map(({ label, value, accent }) => (
+                  <div key={label} className="flex justify-between items-center px-3.5 py-2.5">
+                    <span className="text-xs text-[var(--color-text-muted)]">{label}</span>
+                    <span className={`text-xs text-right max-w-[58%] truncate ${accent}`}>{value}</span>
+                  </div>
+                ))}
+              </div>
+
               {submitError && (
-                <p className="text-xs text-red-400 flex items-center gap-1.5 pt-1">
-                  <AlertCircle size={13} />{submitError}
-                </p>
+                <div className="flex items-start gap-2 px-3 py-2.5 mt-3 bg-red-500/10 border border-red-500/25 rounded-lg">
+                  <AlertCircle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-400 leading-relaxed">{submitError}</p>
+                </div>
               )}
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="px-5 pb-5 flex gap-3">
+        <div className="h-px bg-[var(--color-border)] mx-5" />
+        <div className="px-5 py-4 flex gap-2.5">
           {step !== 'type' && (
             <button
               onClick={() => setStep(STEPS[stepIndex - 1])}
               disabled={isSubmitting}
-              className="flex-1 py-2.5 rounded-xl border border-[var(--color-border)] text-sm font-medium hover:bg-[var(--color-surface-offset)] transition-colors disabled:opacity-40"
+              className="flex-1 py-2.5 rounded-xl border border-[var(--color-border)] text-sm font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-offset)] transition-all disabled:opacity-40"
             >
               Voltar
             </button>
@@ -477,16 +530,24 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
           <button
             onClick={handleNext}
             disabled={
-              (step === 'asset' && !canProceedAsset()) ||
+              (step === 'asset'   && !canProceedAsset())   ||
               (step === 'details' && !canProceedDetails()) ||
               isSubmitting
             }
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--color-primary)] text-white text-sm font-medium hover:bg-[var(--color-primary-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+              step === 'confirm'
+                ? txType === 'BUY'
+                  ? 'bg-emerald-500 hover:bg-emerald-600 text-white'
+                  : 'bg-red-500 hover:bg-red-600 text-white'
+                : 'bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white'
+            }`}
           >
             {isSubmitting ? (
-              <><Loader2 size={15} className="animate-spin" /> Salvando...</>
-            ) : step === 'confirm' ? 'Confirmar' : (
-              <>Próximo <ChevronRight size={15} /></>
+              <><Loader2 size={14} className="animate-spin" /> Salvando...</>
+            ) : step === 'confirm' ? (
+              <>{txType === 'BUY' ? 'Confirmar Compra' : 'Confirmar Venda'}</>
+            ) : (
+              <>Próximo <ChevronRight size={14} /></>
             )}
           </button>
         </div>
