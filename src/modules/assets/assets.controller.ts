@@ -121,6 +121,11 @@ export class AssetsController {
 
       return res.status(201).json(data)
     } catch (error) {
+      // Retorna 409 para ticker duplicado (mensagem vinda do service)
+      const msg = error instanceof Error ? error.message : ''
+      if (msg.includes('já está cadastrado')) {
+        return res.status(409).json({ message: msg })
+      }
       console.error('Erro ao criar ativo:', error)
       return res.status(500).json({
         message: 'Erro interno ao criar ativo.',

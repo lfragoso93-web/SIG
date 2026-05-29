@@ -109,6 +109,9 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   const createAsset  = useCreateAsset()
   const createTx     = useCreateTransaction()
 
+  // Aguarda as classes carregarem: true enquanto a lista não estiver disponível
+  const classesLoading = assetClasses.isLoading || (!assetClasses.data && !assetClasses.isError)
+
   const grossAmount = (parseFloat(quantity) || 0) * (parseFloat(unitPrice) || 0)
   const netAmount   = grossAmount + (parseFloat(fees) || 0)
   const isNewAsset  = searchDone && assetQuery.isFetched && assetQuery.data === null
@@ -136,7 +139,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     else                 setResolvedAsset(null)
   }, [assetQuery.data])
 
-  const runSearch = useCallback(async (ticker: string) => {
+  const runSearch = useCallback(async (ticker: string, classes: AssetClass[]) => {
     setSearchLoading(true)
     setSearchDone(false)
     setBackendQuote(null)
@@ -148,7 +151,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
       setBackendQuote(quote)
       if (quote?.name) setNewAssetName(quote.name)
       if (quote?.inferredClass) {
-        const matched = (assetClasses.data ?? []).find(
+        const matched = classes.find(
           (c: AssetClass) => c.name === quote.inferredClass,
         )
         if (matched) setSelectedClassId(matched.id)
@@ -159,14 +162,15 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
       setSearchLoading(false)
       setSearchDone(true)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assetClasses.data])
+  }, [])
 
   const handleSearch = () => {
     const t = tickerInput.trim().toUpperCase()
     if (t.length < 2) return
+    // Garante que as classes estejam carregadas antes de buscar o quote
+    const classes = assetClasses.data ?? []
     setSearchedTicker(t)
-    runSearch(t)
+    runSearch(t, classes)
   }
 
   const sortedClasses: AssetClass[] = (assetClasses.data ?? []).slice().sort(
@@ -205,7 +209,8 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
 
         if (isNewAsset) {
           // Busca direta (sem cache) para garantir que o ativo realmente não existe.
-          // Isso evita criar um duplicado quando o React Query serviu null por cache stale.
+          // Isso evita criar um duplicado quando o React Query serviu null por cache stale
+          // ou quando o ativo foi criado numa transação anterior na mesma sessão.
           const existingAsset = await fetchAssetByTickerDirect(searchedTicker)
 
           if (existingAsset) {
@@ -379,21 +384,28 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                   <input
                     value={tickerInput}
                     onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                    onKeyDown={(e) => e.key === 'Enter' && !classesLoading && handleSearch()}
                     placeholder="Ex: PETR4, MXRF11"
                     maxLength={30}
                     className={inputClass}
                   />
                   <button
                     onClick={handleSearch}
-                    disabled={tickerInput.trim().length < 2}
+                    disabled={tickerInput.trim().length < 2 || classesLoading}
+                    title={classesLoading ? 'Carregando classes de ativos...' : undefined}
                     className="px-3 py-2 bg-[var(--color-primary)] text-white rounded-lg text-sm hover:bg-[var(--color-primary-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                   >
-                    {(searchLoading || assetQuery.isLoading)
+                    {(searchLoading || assetQuery.isLoading || classesLoading)
                       ? <Loader2 size={15} className="animate-spin" />
                       : <Search size={15} />}
                   </button>
                 </div>
+                {classesLoading && (
+                  <p className="text-xs text-[var(--color-text-faint)] mt-1.5 flex items-center gap-1">
+                    <Loader2 size={10} className="animate-spin" />
+                    Carregando classes de ativos...
+                  </p>
+                )}
               </div>
 
               {resolvedAsset && !isNewAsset && (
