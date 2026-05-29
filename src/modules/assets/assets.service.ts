@@ -97,25 +97,46 @@ export class AssetsService {
       throw new Error('O campo ticker é obrigatório para ativos que não são Tesouro Direto.')
     }
 
-    return prisma.asset.create({
-      data: {
-        ticker,
-        name:         data.name,
-        assetClassId: data.assetClassId,
-        assetType:    data.assetType as AssetType,
-        isin:         data.isin,
-        currencyCode: data.currencyCode,
-        exchange:     data.exchange,
-        sector:       data.sector,
-        segment:      data.segment,
-        issuer:       data.issuer,
-        isActive:     data.isActive,
-        notes:        data.notes,
-        maturityDate: data.maturityDate ? new Date(data.maturityDate) : undefined,
-        indexer:      data.indexer,
-      },
-      include: { assetClass: true },
-    })
+    // Verifica se o ticker já existe antes de tentar criar (evita P2002 genérico)
+    const existing = await prisma.asset.findUnique({ where: { ticker } })
+    if (existing) {
+      throw new Error(
+        `O ativo "${ticker}" já está cadastrado. Use-o diretamente ou edite-o na tela de Ativos.`,
+      )
+    }
+
+    try {
+      return await prisma.asset.create({
+        data: {
+          ticker,
+          name:         data.name,
+          assetClassId: data.assetClassId,
+          assetType:    data.assetType as AssetType,
+          isin:         data.isin,
+          currencyCode: data.currencyCode,
+          exchange:     data.exchange,
+          sector:       data.sector,
+          segment:      data.segment,
+          issuer:       data.issuer,
+          isActive:     data.isActive,
+          notes:        data.notes,
+          maturityDate: data.maturityDate ? new Date(data.maturityDate) : undefined,
+          indexer:      data.indexer,
+        },
+        include: { assetClass: true },
+      })
+    } catch (err) {
+      // Fallback para race condition: dois creates simultâneos do mesmo ticker
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new Error(
+          `O ativo "${ticker}" já está cadastrado. Use-o diretamente ou edite-o na tela de Ativos.`,
+        )
+      }
+      throw err
+    }
   }
 
   async updateByTicker(ticker: string, data: UpdateAssetInput) {
