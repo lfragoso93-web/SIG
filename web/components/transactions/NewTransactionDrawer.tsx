@@ -1,15 +1,14 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  X, Search, ChevronRight, CheckCircle2, Loader2,
-  AlertCircle, Sparkles, TrendingUp, TrendingDown,
+  X, ChevronRight, CheckCircle2, Loader2,
+  AlertCircle, Sparkles, TrendingUp, TrendingDown, Search,
 } from 'lucide-react'
 import { fmt } from '@/lib/utils'
 import { api } from '@/lib/api'
 import {
   useAssetClasses,
-  useAssetByTicker,
   useCreateAsset,
   useCreateTransaction,
   type Asset,
@@ -31,6 +30,7 @@ interface BackendQuote {
   exchDisp?:     string
 }
 
+// ── API helpers ────────────────────────────────────────────────────────────
 async function fetchQuoteFromBackend(ticker: string): Promise<BackendQuote | null> {
   try {
     const res = await api.get<BackendQuote>(`/assets/quote/${encodeURIComponent(ticker)}`)
@@ -51,18 +51,31 @@ async function fetchAssetByTickerDirect(ticker: string): Promise<Asset | null> {
   }
 }
 
+/** Busca ativos já cadastrados que contenham o termo digitado. */
+async function searchLocalAssets(query: string): Promise<Asset[]> {
+  if (query.length < 2) return []
+  try {
+    const { data } = await api.get<Asset[]>(`/assets`, {
+      params: { search: query, limit: 10 },
+    })
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
+  }
+}
+
 const CLASS_NAME_TO_ASSET_TYPE: Record<string, string> = {
-  'Fundo Imobiliário':    'FII',
-  'ETF Nacional':         'ETF',
-  'ETF Internacional':    'ETF',
-  'Ação Nacional':        'STOCK',
-  'Ação Internacional':   'STOCK',
-  'BDR':                  'BDR',
-  'Renda Fixa':           'BOND',
-  'Tesouro Direto':       'BOND',
-  'Criptoativo':          'CRYPTO',
-  'Fundo':                'FUND',
-  'Caixa':                'CASH',
+  'Fundo Imobiliário':  'FII',
+  'ETF Nacional':       'ETF',
+  'ETF Internacional':  'ETF',
+  'Ação Nacional':      'STOCK',
+  'Ação Internacional': 'STOCK',
+  'BDR':                'BDR',
+  'Renda Fixa':         'BOND',
+  'Tesouro Direto':     'BOND',
+  'Criptoativo':        'CRYPTO',
+  'Fundo':              'FUND',
+  'Caixa':              'CASH',
 }
 
 function extractErrorMessage(error: unknown): string {
@@ -78,6 +91,204 @@ function extractErrorMessage(error: unknown): string {
   return 'Erro ao salvar. Tente novamente.'
 }
 
+/** Destaca o trecho que corresponde ao termo buscado dentro de um texto. */
+function Highlight({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>
+  const idx = text.toLowerCase().indexOf(query.toLowerCase())
+  if (idx === -1) return <>{text}</>
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-[var(--color-primary)]/25 text-[var(--color-primary)] rounded-sm px-0.5 font-semibold not-italic">
+        {text.slice(idx, idx + query.length)}
+      </mark>
+      {text.slice(idx + query.length)}
+    </>
+  )
+}
+
+// ── Combobox de ativo ──────────────────────────────────────────────────────
+interface AssetComboboxProps {
+  value: string
+  onChange: (raw: string) => void
+  onSelect: (asset: Asset) => void
+  onTriggerRemoteSearch: (ticker: string) => void
+  inputClass: string
+  disabled?: boolean
+}
+
+function AssetCombobox({
+  value,
+  onChange,
+  onSelect,
+  onTriggerRemoteSearch,
+  inputClass,
+  disabled,
+}: AssetComboboxProps) {
+  const [suggestions, setSuggestions] = useState<Asset[]>([])
+  const [loading, setLoading]         = useState(false)
+  const [open, setOpen]               = useState(false)
+  const [activeIdx, setActiveIdx]     = useState(-1)
+  const debounceRef                   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const containerRef                  = useRef<HTMLDivElement>(null)
+  const listRef                       = useRef<HTMLUListElement>(null)
+
+  // Fecha ao clicar fora
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Debounce 400ms → busca local
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (value.length < 2) {
+      setSuggestions([])
+      setOpen(false)
+      return
+    }
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true)
+      const results = await searchLocalAssets(value)
+      setSuggestions(results)
+      setOpen(results.length > 0)
+      setActiveIdx(-1)
+      setLoading(false)
+    }, 400)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [value])
+
+  // Scroll item ativo em vista
+  useEffect(() => {
+    if (activeIdx >= 0 && listRef.current) {
+      const el = listRef.current.children[activeIdx] as HTMLElement | undefined
+      el?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [activeIdx])
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!open && e.key !== 'Enter') return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setActiveIdx(i => Math.min(i + 1, suggestions.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setActiveIdx(i => Math.max(i - 1, -1))
+    } else if (e.key === 'Escape') {
+      setOpen(false)
+      setActiveIdx(-1)
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (open && activeIdx >= 0 && suggestions[activeIdx]) {
+        handleSelect(suggestions[activeIdx])
+      } else {
+        // Nenhuma sugestão selecionada → dispara busca remota
+        const t = value.trim().toUpperCase()
+        if (t.length >= 2) {
+          setOpen(false)
+          onTriggerRemoteSearch(t)
+        }
+      }
+    }
+  }
+
+  function handleSelect(asset: Asset) {
+    setOpen(false)
+    setSuggestions([])
+    onSelect(asset)
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div className="relative">
+        <input
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value.toUpperCase())
+            setOpen(true)
+          }}
+          onKeyDown={handleKeyDown}
+          onFocus={() => suggestions.length > 0 && setOpen(true)}
+          placeholder="Ex: PETR4, MXRF11, BTC…"
+          maxLength={30}
+          disabled={disabled}
+          className={`${inputClass} pr-9`}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={open}
+          aria-activedescendant={activeIdx >= 0 ? `opt-${activeIdx}` : undefined}
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-faint)]">
+          {loading
+            ? <Loader2 size={14} className="animate-spin" />
+            : <Search size={14} />}
+        </span>
+      </div>
+
+      {open && suggestions.length > 0 && (
+        <ul
+          ref={listRef}
+          role="listbox"
+          className="absolute z-50 left-0 right-0 mt-1.5 max-h-52 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[0_8px_24px_oklch(0_0_0/0.35)] divide-y divide-[var(--color-border)]"
+        >
+          {suggestions.map((asset, i) => (
+            <li
+              key={asset.id}
+              id={`opt-${i}`}
+              role="option"
+              aria-selected={i === activeIdx}
+              onMouseEnter={() => setActiveIdx(i)}
+              onMouseDown={(e) => { e.preventDefault(); handleSelect(asset) }}
+              className={`flex items-center justify-between gap-3 px-3.5 py-2.5 cursor-pointer transition-colors ${
+                i === activeIdx
+                  ? 'bg-[var(--color-primary)]/12'
+                  : 'hover:bg-[var(--color-surface-offset)]'
+              }`}
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-semibold leading-tight">
+                  <Highlight text={asset.ticker} query={value} />
+                </p>
+                {asset.name && (
+                  <p className="text-xs text-[var(--color-text-muted)] truncate mt-0.5">
+                    <Highlight text={asset.name} query={value} />
+                  </p>
+                )}
+              </div>
+              {asset.assetClass?.name && (
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[var(--color-surface-offset)] text-[var(--color-text-faint)] flex-shrink-0 whitespace-nowrap">
+                  {asset.assetClass.name}
+                </span>
+              )}
+            </li>
+          ))}
+          {/* Rodapé: busca remota caso não encontre */}
+          <li
+            role="option"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              const t = value.trim().toUpperCase()
+              if (t.length >= 2) { setOpen(false); onTriggerRemoteSearch(t) }
+            }}
+            className="flex items-center gap-2 px-3.5 py-2.5 cursor-pointer text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-offset)] transition-colors"
+          >
+            <Search size={11} />
+            Buscar &ldquo;{value}&rdquo; no mercado
+          </li>
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// ── Drawer principal ───────────────────────────────────────────────────────
 export function NewTransactionDrawer({ open, onClose }: Props) {
   const [step, setStep]     = useState<Step>('type')
   const [txType, setTxType] = useState<'BUY' | 'SELL'>('BUY')
@@ -99,7 +310,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   const [submitError, setSubmitError] = useState('')
 
   const assetClasses = useAssetClasses()
-  const assetQuery   = useAssetByTicker(searchedTicker)
   const createAsset  = useCreateAsset()
   const createTx     = useCreateTransaction()
 
@@ -107,7 +317,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
 
   const grossAmount = (parseFloat(quantity) || 0) * (parseFloat(unitPrice) || 0)
   const netAmount   = grossAmount + (parseFloat(fees) || 0)
-  const isNewAsset  = searchDone && assetQuery.isFetched && assetQuery.data === null
+  const isNewAsset  = searchDone && !resolvedAsset
 
   const selectedClassName = (assetClasses.data ?? []).find(
     (c: AssetClass) => c.id === selectedClassId,
@@ -127,41 +337,55 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     }
   }, [open])
 
-  useEffect(() => {
-    if (assetQuery.data) setResolvedAsset(assetQuery.data)
-    else                 setResolvedAsset(null)
-  }, [assetQuery.data])
-
-  const runSearch = useCallback(async (ticker: string, classes: AssetClass[]) => {
-    setSearchLoading(true)
-    setSearchDone(false)
+  /** Chamado quando o usuário seleciona um ativo existente no combobox. */
+  const handleSelectLocalAsset = useCallback((asset: Asset) => {
+    setTickerInput(asset.ticker)
+    setSearchedTicker(asset.ticker)
+    setResolvedAsset(asset)
+    setSearchDone(true)
     setBackendQuote(null)
     setNewAssetName('')
     setSelectedClassId('')
-    setUnitPrice('')
+  }, [])
+
+  /** Chamado quando o usuário pressiona Enter sem sugestão ou clica em "buscar no mercado". */
+  const handleTriggerRemoteSearch = useCallback(async (ticker: string) => {
+    setSearchedTicker(ticker)
+    setTickerInput(ticker)
+    setResolvedAsset(null)
+    setSearchDone(false)
+    setSearchLoading(true)
+    setBackendQuote(null)
+    setNewAssetName('')
+    setSelectedClassId('')
+
     try {
+      // 1. Tenta encontrar no banco pelo ticker exato
+      const existing = await fetchAssetByTickerDirect(ticker)
+      if (existing) {
+        setResolvedAsset(existing)
+        setSearchDone(true)
+        setSearchLoading(false)
+        return
+      }
+
+      // 2. Busca cotação no mercado (Yahoo Finance / backend)
       const quote = await fetchQuoteFromBackend(ticker)
       setBackendQuote(quote)
       if (quote?.name) setNewAssetName(quote.name)
       if (quote?.inferredClass) {
-        const matched = classes.find((c: AssetClass) => c.name === quote.inferredClass)
+        const matched = (assetClasses.data ?? []).find(
+          (c: AssetClass) => c.name === quote.inferredClass,
+        )
         if (matched) setSelectedClassId(matched.id)
       }
     } catch {
       setBackendQuote(null)
     } finally {
-      setSearchLoading(false)
       setSearchDone(true)
+      setSearchLoading(false)
     }
-  }, [])
-
-  const handleSearch = () => {
-    const t = tickerInput.trim().toUpperCase()
-    if (t.length < 2) return
-    const classes = assetClasses.data ?? []
-    setSearchedTicker(t)
-    runSearch(t, classes)
-  }
+  }, [assetClasses.data])
 
   const sortedClasses: AssetClass[] = (assetClasses.data ?? []).slice().sort(
     (a, b) => a.displayOrder - b.displayOrder,
@@ -169,7 +393,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
 
   const canProceedAsset = () => {
     if (!searchedTicker || !searchDone) return false
-    if (searchLoading || assetQuery.isLoading) return false
+    if (searchLoading) return false
     if (isNewAsset) return newAssetName.trim().length > 0 && selectedClassId.length > 0
     return resolvedAsset !== null
   }
@@ -183,9 +407,9 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
 
   const stepConfig = {
     type:    { label: 'Tipo de operação', step: 1 },
-    asset:   { label: 'Ativo',              step: 2 },
-    details: { label: 'Detalhes',           step: 3 },
-    confirm: { label: 'Confirmar',          step: 4 },
+    asset:   { label: 'Ativo',            step: 2 },
+    details: { label: 'Detalhes',         step: 3 },
+    confirm: { label: 'Confirmar',        step: 4 },
   }
 
   const handleNext = async () => {
@@ -231,7 +455,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     }
   }
 
-  // ── Estilos base ──────────────────────────────────────────────────────────
+  // Estilos base
   const inputBase = [
     'w-full rounded-lg px-3 py-2 text-sm',
     'bg-[var(--color-surface-offset)] border border-[var(--color-border)]',
@@ -241,10 +465,8 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     'transition-all duration-150',
   ].join(' ')
 
-  // Select precisa de color-scheme para o dropdown nativo do OS seguir o tema
   const selectClass = `${inputBase} appearance-none`
-
-  const labelClass = 'block text-xs font-medium text-[var(--color-text-muted)] mb-1.5'
+  const labelClass  = 'block text-xs font-medium text-[var(--color-text-muted)] mb-1.5'
 
   return (
     <>
@@ -361,40 +583,45 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
             </div>
           )}
 
-          {/* Step 2: Ativo */}
+          {/* Step 2: Ativo — Combobox com autocomplete */}
           {step === 'asset' && (
             <div className="space-y-4">
               <div>
-                <label className={labelClass}>Ticker</label>
-                <div className="flex gap-2">
-                  <input
-                    value={tickerInput}
-                    onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
-                    onKeyDown={(e) => e.key === 'Enter' && !classesLoading && handleSearch()}
-                    placeholder="Ex: PETR4, MXRF11"
-                    maxLength={30}
-                    className={inputBase}
-                  />
-                  <button
-                    onClick={handleSearch}
-                    disabled={tickerInput.trim().length < 2 || classesLoading}
-                    title={classesLoading ? 'Carregando classes de ativos...' : undefined}
-                    className="px-3 py-2 bg-[var(--color-primary)] text-white rounded-lg text-sm hover:bg-[var(--color-primary-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-                  >
-                    {(searchLoading || assetQuery.isLoading || classesLoading)
-                      ? <Loader2 size={15} className="animate-spin" />
-                      : <Search size={15} />}
-                  </button>
-                </div>
+                <label className={labelClass}>Ticker / Ativo</label>
+                <AssetCombobox
+                  value={tickerInput}
+                  onChange={(raw) => {
+                    setTickerInput(raw)
+                    // Reset estado se o usuário apagar e redigitar
+                    if (resolvedAsset && raw !== resolvedAsset.ticker) {
+                      setResolvedAsset(null)
+                      setSearchDone(false)
+                      setSearchedTicker('')
+                    }
+                  }}
+                  onSelect={handleSelectLocalAsset}
+                  onTriggerRemoteSearch={handleTriggerRemoteSearch}
+                  inputClass={inputBase}
+                  disabled={classesLoading}
+                />
                 {classesLoading && (
                   <p className="text-xs text-[var(--color-text-faint)] mt-1.5 flex items-center gap-1">
                     <Loader2 size={10} className="animate-spin" />
-                    Carregando classes de ativos...
+                    Carregando classes de ativos…
                   </p>
                 )}
               </div>
 
-              {resolvedAsset && !isNewAsset && (
+              {/* Loading busca remota */}
+              {searchLoading && (
+                <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                  <Loader2 size={13} className="animate-spin" />
+                  Buscando {searchedTicker} no mercado…
+                </div>
+              )}
+
+              {/* Ativo encontrado no banco */}
+              {resolvedAsset && !isNewAsset && !searchLoading && (
                 <div className="flex items-center gap-3 px-3.5 py-3 bg-emerald-500/8 border border-emerald-500/25 rounded-xl">
                   <CheckCircle2 size={15} className="text-emerald-400 flex-shrink-0" />
                   <div className="min-w-0 flex-1">
@@ -409,7 +636,8 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                 </div>
               )}
 
-              {isNewAsset && (
+              {/* Ativo novo — preenchimento manual */}
+              {isNewAsset && !searchLoading && (
                 <div className="space-y-3">
                   <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${
                     backendQuote?.name
@@ -421,7 +649,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                       : <><AlertCircle size={11} /> <span>Ativo não encontrado. Preencha manualmente.</span></>}
                   </div>
 
-                  {/* Nome: textarea para acomodar nomes longos (Tesouro Direto) */}
                   <div>
                     <label className={labelClass}>Nome do ativo *</label>
                     <textarea
@@ -429,14 +656,10 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                       onChange={(e) => setNewAssetName(e.target.value)}
                       placeholder="Ex: Tesouro IPCA+ 2035"
                       rows={2}
-                      className={[
-                        inputBase,
-                        'resize-none leading-snug',
-                      ].join(' ')}
+                      className={[inputBase, 'resize-none leading-snug'].join(' ')}
                     />
                   </div>
 
-                  {/* Classe: select com color-scheme explícito para dark mode */}
                   <div>
                     <label className={labelClass}>
                       Classe de ativo *
@@ -450,30 +673,20 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                         onChange={(e) => setSelectedClassId(e.target.value)}
                         style={{
                           colorScheme: 'dark',
-                          // garante que o texto do option selecionado seja legível
-                          // em qualquer tema (iOS/macOS ignoram color-scheme no select)
                           color: 'var(--color-text)',
                           backgroundColor: 'var(--color-surface-offset)',
                         }}
                         className={selectClass}
                       >
-                        <option
-                          value=""
-                          style={{ color: 'var(--color-text-faint)', backgroundColor: 'var(--color-surface-offset)' }}
-                        >
+                        <option value="" style={{ color: 'var(--color-text-faint)', backgroundColor: 'var(--color-surface-offset)' }}>
                           Selecione a classe
                         </option>
                         {sortedClasses.map((c) => (
-                          <option
-                            key={c.id}
-                            value={c.id}
-                            style={{ color: 'var(--color-text)', backgroundColor: 'var(--color-surface-offset)' }}
-                          >
+                          <option key={c.id} value={c.id} style={{ color: 'var(--color-text)', backgroundColor: 'var(--color-surface-offset)' }}>
                             {c.name}
                           </option>
                         ))}
                       </select>
-                      {/* seta custom para substituir a nativa que desaparece com appearance-none */}
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]">
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                           <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
