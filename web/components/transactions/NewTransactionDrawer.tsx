@@ -42,8 +42,10 @@ async function fetchQuoteFromBackend(ticker: string): Promise<BackendQuote | nul
 }
 
 // Mapa: nome da classe (como vem do banco) → assetType usado no create
+// Valores DEVEM bater com o enum AssetType do Prisma:
+//   STOCK | FII | ETF | BDR | CRYPTO | BOND | FUND | CASH | OTHER
 const CLASS_NAME_TO_ASSET_TYPE: Record<string, string> = {
-  'Fundo Imobiliário':    'REIT',
+  'Fundo Imobiliário':    'FII',      // era 'REIT' — não existe no enum
   'ETF Nacional':         'ETF',
   'ETF Internacional':    'ETF',
   'Ação Nacional':        'STOCK',
@@ -52,6 +54,8 @@ const CLASS_NAME_TO_ASSET_TYPE: Record<string, string> = {
   'Renda Fixa':           'BOND',
   'Tesouro Direto':       'BOND',
   'Criptoativo':          'CRYPTO',
+  'Fundo':                'FUND',
+  'Caixa':                'CASH',
 }
 
 export function NewTransactionDrawer({ open, onClose }: Props) {
@@ -91,7 +95,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
   const selectedClassName = (assetClasses.data ?? []).find(
     (c: AssetClass) => c.id === selectedClassId,
   )?.name ?? ''
-  const inferredAssetType = CLASS_NAME_TO_ASSET_TYPE[selectedClassName] ?? 'STOCK'
+  const inferredAssetType = CLASS_NAME_TO_ASSET_TYPE[selectedClassName] ?? 'OTHER'
 
   // Reset ao fechar
   useEffect(() => {
