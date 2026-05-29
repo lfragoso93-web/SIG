@@ -156,7 +156,7 @@ function AssetCombobox({
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (!open && e.key !== 'Enter') return
-    if (e.key === 'ArrowDown')  { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, suggestions.length - 1)) }
+    if (e.key === 'ArrowDown')      { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, suggestions.length - 1)) }
     else if (e.key === 'ArrowUp')   { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, -1)) }
     else if (e.key === 'Escape')    { setOpen(false); setActiveIdx(-1) }
     else if (e.key === 'Enter') {
@@ -249,16 +249,65 @@ function AssetCombobox({
   )
 }
 
+// ── ClassSelect (reutilizável) ─────────────────────────────────────────────────────
+function ClassSelect({
+  value, onChange, classes, selectClass, labelClass, showSuggested,
+}: {
+  value: string
+  onChange: (v: string) => void
+  classes: AssetClass[]
+  selectClass: string
+  labelClass: string
+  showSuggested?: boolean
+}) {
+  return (
+    <div>
+      <label className={labelClass}>
+        Classe de ativo
+        {showSuggested && (
+          <span className="ml-1.5 text-[var(--color-primary)] font-normal opacity-70">(sugerida)</span>
+        )}
+      </label>
+      <div className="relative">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{
+            colorScheme: 'dark',
+            color: 'var(--color-text)',
+            backgroundColor: 'var(--color-surface-offset)',
+          }}
+          className={selectClass}
+        >
+          <option value="" style={{ color: 'var(--color-text-faint)', backgroundColor: 'var(--color-surface-offset)' }}>
+            Selecione a classe
+          </option>
+          {classes.map((c) => (
+            <option key={c.id} value={c.id} style={{ color: 'var(--color-text)', backgroundColor: 'var(--color-surface-offset)' }}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </span>
+      </div>
+    </div>
+  )
+}
+
 // ── Drawer principal ──────────────────────────────────────────────────────────
 export function NewTransactionDrawer({ open, onClose }: Props) {
   const [txType, setTxType] = useState<'BUY' | 'SELL'>('BUY')
 
-  const [tickerInput, setTickerInput]     = useState('')
+  const [tickerInput, setTickerInput]       = useState('')
   const [searchedTicker, setSearchedTicker] = useState('')
-  const [resolvedAsset, setResolvedAsset] = useState<Asset | null>(null)
-  const [backendQuote, setBackendQuote]   = useState<BackendQuote | null>(null)
-  const [searchLoading, setSearchLoading] = useState(false)
-  const [searchDone, setSearchDone]       = useState(false)
+  const [resolvedAsset, setResolvedAsset]   = useState<Asset | null>(null)
+  const [backendQuote, setBackendQuote]     = useState<BackendQuote | null>(null)
+  const [searchLoading, setSearchLoading]   = useState(false)
+  const [searchDone, setSearchDone]         = useState(false)
 
   const [newAssetName, setNewAssetName]       = useState('')
   const [selectedClassId, setSelectedClassId] = useState('')
@@ -304,6 +353,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     }
   }, [open])
 
+  /** Seleciona ativo local — preenche classe automaticamente */
   const handleSelectLocalAsset = useCallback((asset: Asset) => {
     setTickerInput(asset.ticker)
     setSearchedTicker(asset.ticker)
@@ -311,9 +361,11 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     setSearchDone(true)
     setBackendQuote(null)
     setNewAssetName('')
-    setSelectedClassId('')
+    // Preenche classe com a do ativo selecionado
+    setSelectedClassId(asset.assetClassId ?? asset.assetClass?.id ?? '')
   }, [])
 
+  /** Busca remota — tenta banco direto, depois quote do mercado */
   const handleTriggerRemoteSearch = useCallback(async (ticker: string) => {
     setSearchedTicker(ticker)
     setTickerInput(ticker)
@@ -327,6 +379,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
       const existing = await fetchAssetByTickerDirect(ticker)
       if (existing) {
         setResolvedAsset(existing)
+        setSelectedClassId(existing.assetClassId ?? existing.assetClass?.id ?? '')
         setSearchDone(true)
         setSearchLoading(false)
         return
@@ -350,8 +403,9 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
 
   const canSubmit = () => {
     if (!searchedTicker || !searchDone || searchLoading) return false
-    if (isNewAsset && (newAssetName.trim().length === 0 || selectedClassId.length === 0)) return false
     if (!resolvedAsset && !isNewAsset) return false
+    if (isNewAsset && newAssetName.trim().length === 0) return false
+    if (!selectedClassId) return false  // obrigatório sempre
     if (!tradeDate || parseFloat(quantity) <= 0 || parseFloat(unitPrice) <= 0) return false
     return true
   }
@@ -392,7 +446,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     }
   }
 
-  // Estilos base
   const inputBase = [
     'w-full rounded-lg px-3 py-2 text-sm',
     'bg-[var(--color-surface-offset)] border border-[var(--color-border)]',
@@ -404,7 +457,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
 
   const selectClass = `${inputBase} appearance-none`
   const labelClass  = 'block text-xs font-medium text-[var(--color-text-muted)] mb-1.5'
-
   const isBuy = txType === 'BUY'
 
   return (
@@ -435,9 +487,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
               isBuy ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
             }`}>
-              {isBuy
-                ? <TrendingUp size={15} strokeWidth={2.5} />
-                : <TrendingDown size={15} strokeWidth={2.5} />}
+              {isBuy ? <TrendingUp size={15} strokeWidth={2.5} /> : <TrendingDown size={15} strokeWidth={2.5} />}
             </div>
             <p className="text-sm font-semibold">Novo Lançamento</p>
           </div>
@@ -455,7 +505,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
         {/* Corpo com scroll */}
         <div className="overflow-y-auto flex-1 px-5 py-5 space-y-5">
 
-          {/* Toggle Compra / Venda */}
+          {/* Tipo de operação */}
           <div>
             <label className={labelClass}>Tipo de operação</label>
             <div className="grid grid-cols-2 gap-2">
@@ -475,15 +525,23 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                     }
                   `}
                 >
-                  {t === 'BUY'
-                    ? <TrendingUp size={13} />
-                    : <TrendingDown size={13} />}
+                  {t === 'BUY' ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
                   {t === 'BUY' ? 'Compra' : 'Venda'}
                   {txType === t && <CheckCircle2 size={13} />}
                 </button>
               ))}
             </div>
           </div>
+
+          {/* Classe de ativo — sempre visível */}
+          <ClassSelect
+            value={selectedClassId}
+            onChange={setSelectedClassId}
+            classes={sortedClasses}
+            selectClass={selectClass}
+            labelClass={labelClass}
+            showSuggested={!!(selectedClassId && backendQuote?.inferredClass)}
+          />
 
           {/* Ativo — combobox */}
           <div>
@@ -496,6 +554,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                   setResolvedAsset(null)
                   setSearchDone(false)
                   setSearchedTicker('')
+                  setSelectedClassId('')
                 }
               }}
               onSelect={handleSelectLocalAsset}
@@ -504,7 +563,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
               disabled={classesLoading}
             />
 
-            {/* Loading busca remota */}
             {searchLoading && (
               <p className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] mt-2">
                 <Loader2 size={12} className="animate-spin" />
@@ -512,7 +570,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
               </p>
             )}
 
-            {/* Ativo encontrado */}
             {resolvedAsset && !searchLoading && (
               <div className="flex items-center gap-3 px-3.5 py-2.5 mt-2 bg-emerald-500/8 border border-emerald-500/25 rounded-xl">
                 <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
@@ -528,7 +585,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
               </div>
             )}
 
-            {/* Ativo novo — campos extras */}
+            {/* Ativo novo: nome + aviso */}
             {isNewAsset && !searchLoading && (
               <div className="mt-3 space-y-3">
                 <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${
@@ -540,7 +597,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                     ? <><Sparkles size={11} /><span>Nome sugerido — confirme os dados</span></>
                     : <><AlertCircle size={11} /><span>Ativo não encontrado. Preencha manualmente.</span></>}
                 </div>
-
                 <div>
                   <label className={labelClass}>Nome do ativo *</label>
                   <textarea
@@ -551,41 +607,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                     className={[inputBase, 'resize-none leading-snug'].join(' ')}
                   />
                 </div>
-
-                <div>
-                  <label className={labelClass}>
-                    Classe de ativo *
-                    {selectedClassId && backendQuote?.inferredClass && (
-                      <span className="ml-1.5 text-[var(--color-primary)] font-normal opacity-70">(sugerida)</span>
-                    )}
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={selectedClassId}
-                      onChange={(e) => setSelectedClassId(e.target.value)}
-                      style={{
-                        colorScheme: 'dark',
-                        color: 'var(--color-text)',
-                        backgroundColor: 'var(--color-surface-offset)',
-                      }}
-                      className={selectClass}
-                    >
-                      <option value="" style={{ color: 'var(--color-text-faint)', backgroundColor: 'var(--color-surface-offset)' }}>
-                        Selecione a classe
-                      </option>
-                      {sortedClasses.map((c) => (
-                        <option key={c.id} value={c.id} style={{ color: 'var(--color-text)', backgroundColor: 'var(--color-surface-offset)' }}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]">
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                        <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    </span>
-                  </div>
-                </div>
               </div>
             )}
           </div>
@@ -594,8 +615,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
           <div>
             <label className={labelClass}>Data do negócio</label>
             <input
-              type="date"
-              value={tradeDate}
+              type="date" value={tradeDate}
               onChange={(e) => setTradeDate(e.target.value)}
               className={inputBase}
             />
@@ -606,8 +626,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
             <div>
               <label className={labelClass}>Quantidade</label>
               <input
-                type="number" min="0" step="1"
-                value={quantity}
+                type="number" min="0" step="1" value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 placeholder="0"
                 className={`${inputBase} tabular-nums`}
@@ -616,8 +635,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
             <div>
               <label className={labelClass}>Preço unitário (R$)</label>
               <input
-                type="number" min="0" step="0.01"
-                value={unitPrice}
+                type="number" min="0" step="0.01" value={unitPrice}
                 onChange={(e) => setUnitPrice(e.target.value)}
                 placeholder="0,00"
                 className={`${inputBase} tabular-nums`}
@@ -629,14 +647,13 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
           <div>
             <label className={labelClass}>Taxas (R$)</label>
             <input
-              type="number" min="0" step="0.01"
-              value={fees}
+              type="number" min="0" step="0.01" value={fees}
               onChange={(e) => setFees(e.target.value)}
               className={`${inputBase} tabular-nums`}
             />
           </div>
 
-          {/* Resumo em tempo real */}
+          {/* Resumo */}
           {grossAmount > 0 && (
             <div className="bg-[var(--color-surface-offset)] rounded-xl p-4 space-y-2">
               <div className="flex justify-between text-xs text-[var(--color-text-muted)]">
@@ -661,7 +678,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
             </div>
           )}
 
-          {/* Erro de submit */}
           {submitError && (
             <div className="flex items-start gap-2 px-3 py-2.5 bg-red-500/10 border border-red-500/25 rounded-lg">
               <AlertCircle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
