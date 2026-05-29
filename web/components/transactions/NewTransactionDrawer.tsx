@@ -40,9 +40,22 @@ async function fetchQuoteFromBackend(ticker: string): Promise<BackendQuote | nul
   }
 }
 
+/**
+ * Busca o ativo diretamente na API (sem cache do React Query).
+ * Retorna null se 404, lança em outros erros.
+ */
+async function fetchAssetByTickerDirect(ticker: string): Promise<Asset | null> {
+  try {
+    const { data } = await api.get<Asset>(`/assets/ticker/${ticker.toUpperCase()}`)
+    return data
+  } catch (e: unknown) {
+    const err = e as { response?: { status?: number } }
+    if (err?.response?.status === 404) return null
+    throw e
+  }
+}
+
 // Mapa: nome da classe (como vem do banco) → assetType
-// Valores DEVEM bater com o enum AssetType do Prisma:
-// STOCK | FII | ETF | BDR | CRYPTO | BOND | FUND | CASH | OTHER
 const CLASS_NAME_TO_ASSET_TYPE: Record<string, string> = {
   'Fundo Imobiliário':    'FII',
   'ETF Nacional':         'ETF',
@@ -189,16 +202,28 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
       setSubmitError('')
       try {
         let assetId = resolvedAsset?.id ?? ''
+
         if (isNewAsset) {
-          const created = await createAsset.mutateAsync({
-            ticker:       searchedTicker,
-            name:         newAssetName,
-            assetClassId: selectedClassId,
-            assetType:    inferredAssetType,
-            currencyCode: 'BRL',
-          })
-          assetId = created.id
+          // Busca direta (sem cache) para garantir que o ativo realmente não existe.
+          // Isso evita criar um duplicado quando o React Query serviu null por cache stale.
+          const existingAsset = await fetchAssetByTickerDirect(searchedTicker)
+
+          if (existingAsset) {
+            // Ativo já existe: aproveita o id encontrado, sem criar
+            assetId = existingAsset.id
+            setResolvedAsset(existingAsset)
+          } else {
+            const created = await createAsset.mutateAsync({
+              ticker:       searchedTicker,
+              name:         newAssetName,
+              assetClassId: selectedClassId,
+              assetType:    inferredAssetType,
+              currencyCode: 'BRL',
+            })
+            assetId = created.id
+          }
         }
+
         await createTx.mutateAsync({
           type:        txType,
           assetId,
@@ -320,7 +345,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
                         ? t === 'BUY'
                           ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-400'
                           : 'border-red-500/60 bg-red-500/10 text-red-400'
-                        : 'border-[var(--color-border)] hover:border-[var(--color-border-subtle,var(--color-primary-highlight))] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                        : 'border-[var(--color-border)] hover:border-[var(--color-primary-highlight)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
                     }
                   `}
                 >
