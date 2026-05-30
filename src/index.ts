@@ -15,6 +15,7 @@ import { performanceRouter }        from './modules/performance/performance.rout
 import { dividendsRouter }          from './modules/dividends/dividends.routes'
 import { treasuryRouter }           from './modules/treasury/treasury.routes'
 import { fixedIncomeRouter }        from './modules/fixed-income/fixed-income.routes'
+import { irpfRouter }               from './modules/irpf/irpf.routes'
 import { authenticate }             from './shared/middleware/authenticate'
 import { errorHandler }             from './shared/middleware/errorHandler'
 import { startSnapshotCrons }       from './jobs/snapshot.cron'
@@ -48,6 +49,7 @@ app.use('/performance',         authenticate, performanceRouter)
 app.use('/dividends',           authenticate, dividendsRouter)
 app.use('/treasury',            authenticate, treasuryRouter)
 app.use('/fixed-income',        authenticate, fixedIncomeRouter)
+app.use('/irpf',                authenticate, irpfRouter)
 
 app.use(errorHandler)
 
