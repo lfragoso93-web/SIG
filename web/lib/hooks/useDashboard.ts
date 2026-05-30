@@ -1,6 +1,6 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type {
   PortfolioSnapshot,
@@ -48,13 +48,25 @@ export function usePerformance() {
 }
 
 // Proventos recebidos — endpoint: GET /dividends/summary
-export function useDividends() {
+export function useDividends(year?: number) {
   return useQuery<DividendSummary>({
-    queryKey: ['dividends'],
+    queryKey: ['dividends', year],
     queryFn: async () => {
-      const res = await api.get<DividendSummary>('/dividends/summary')
+      const res = await api.get<DividendSummary>('/dividends/summary', {
+        params: year ? { year } : {},
+      })
       return res.data
     },
     staleTime: 5 * 60 * 1000,
+  })
+}
+
+// Gerar snapshots para um range de datas
+export function useGenerateSnapshotRange() {
+  return useMutation({
+    mutationFn: async (payload: { startDate: string; endDate: string; period?: string }) => {
+      const res = await api.post('/portfolio-snapshots/generate-range', payload)
+      return res.data as { generated: number; skipped: number; errors: number }
+    },
   })
 }

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   TrendingUp, LayoutDashboard, Briefcase, Building2,
-  PiggyBank, ArrowLeftRight, PieChart, LogOut, Menu, X, Plus,
+  PiggyBank, ArrowLeftRight, PieChart, LogOut, Menu, X, Plus, HandCoins,
 } from 'lucide-react'
 import { useState } from 'react'
 import { authService } from '@/lib/auth'
@@ -13,6 +13,7 @@ import { NewTransactionDrawer } from '@/components/transactions/NewTransactionDr
 const NAV = [
   { href: '/',               label: 'Dashboard',     icon: LayoutDashboard },
   { href: '/portfolio',      label: 'Portfólio',      icon: Briefcase       },
+  { href: '/dividends',      label: 'Proventos',      icon: HandCoins       },
   { href: '/treasury',       label: 'Tesouro Direto', icon: Building2       },
   { href: '/fixed-income',   label: 'Renda Fixa',     icon: PiggyBank       },
   { href: '/transactions',   label: 'Transações',    icon: ArrowLeftRight  },

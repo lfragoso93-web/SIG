@@ -1,32 +1,31 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from 'recharts'
-import { LayoutDashboard, TrendingUp, Wallet, HandCoins, BarChart3, AlertCircle, RefreshCw } from 'lucide-react'
+import {
+  LayoutDashboard, TrendingUp, Wallet, HandCoins, BarChart3,
+  AlertCircle, RefreshCw, CalendarRange, X, Loader2, CheckCircle2,
+} from 'lucide-react'
 import { format, parseISO, isValid } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { KpiCard } from '@/components/ui/kpi-card'
-import { useSnapshots, useAllocation, usePerformance, useDividends } from '@/lib/hooks/useDashboard'
+import {
+  useSnapshots, useAllocation, usePerformance, useDividends,
+  useGenerateSnapshotRange,
+} from '@/lib/hooks/useDashboard'
 import { fmt } from '@/lib/utils'
+import { useQueryClient } from '@tanstack/react-query'
 
 const ALLOCATION_COLORS = [
-  '#6366f1',
-  '#22c55e',
-  '#f59e0b',
-  '#3b82f6',
-  '#a855f7',
-  '#ec4899',
-  '#14b8a6',
-  '#f97316',
+  '#6366f1', '#22c55e', '#f59e0b', '#3b82f6',
+  '#a855f7', '#ec4899', '#14b8a6', '#f97316',
 ]
 
 function Skeleton({ className = '' }: { className?: string }) {
-  return (
-    <div className={`bg-[var(--color-surface-3)] rounded animate-pulse ${className}`} />
-  )
+  return <div className={`bg-[var(--color-surface-3)] rounded animate-pulse ${className}`} />
 }
 
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
@@ -68,13 +67,114 @@ function PieTooltip({ active, payload }: { active?: boolean; payload?: { name: s
   )
 }
 
+// ── Modal Gerar Snapshots ──────────────────────────────────────────────────
+function GenerateSnapshotsModal({ onClose }: { onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const today = new Date().toISOString().slice(0, 10)
+  const [startDate, setStartDate] = useState(today)
+  const [endDate, setEndDate]     = useState(today)
+  const [result, setResult]       = useState<{ generated: number; skipped: number; errors: number } | null>(null)
+
+  const mutation = useGenerateSnapshotRange()
+
+  const handleGenerate = async () => {
+    setResult(null)
+    try {
+      const data = await mutation.mutateAsync({ startDate, endDate, period: 'DAILY' })
+      setResult(data)
+      queryClient.invalidateQueries({ queryKey: ['snapshots'] })
+    } catch {
+      // erro tratado via mutation.isError
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" onClick={onClose}>
+      <div
+        className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-xl w-full max-w-sm p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2">
+            <CalendarRange size={16} className="text-[var(--color-primary)]" />
+            <h2 className="text-sm font-semibold">Gerar Snapshots</h2>
+          </div>
+          <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <p className="text-xs text-[var(--color-text-muted)] mb-5">
+          Gera snapshots diários do patrimônio para o período selecionado.
+          Dias sem preço (feriados/fins de semana) são ignorados automaticamente.
+        </p>
+
+        <div className="space-y-3 mb-5">
+          <div>
+            <label className="block text-xs text-[var(--color-text-muted)] mb-1">Data inicial</label>
+            <input
+              type="date"
+              value={startDate}
+              max={today}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full bg-[var(--color-surface-3)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)] transition-colors"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-[var(--color-text-muted)] mb-1">Data final</label>
+            <input
+              type="date"
+              value={endDate}
+              min={startDate}
+              max={today}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="w-full bg-[var(--color-surface-3)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)] transition-colors"
+            />
+          </div>
+        </div>
+
+        {mutation.isError && (
+          <div className="flex items-center gap-2 text-xs text-[var(--color-error)] bg-[var(--color-error-muted)] rounded-lg px-3 py-2 mb-4">
+            <AlertCircle size={13} />
+            Erro ao gerar snapshots. Verifique as datas e tente novamente.
+          </div>
+        )}
+
+        {result && (
+          <div className="flex items-start gap-2 text-xs text-[var(--color-success)] bg-[var(--color-success-muted)] rounded-lg px-3 py-2 mb-4">
+            <CheckCircle2 size={13} className="mt-0.5 flex-shrink-0" />
+            <span>
+              <strong>{result.generated}</strong> gerado(s)&nbsp;·&nbsp;
+              <strong>{result.skipped}</strong> ignorado(s)&nbsp;·&nbsp;
+              <strong>{result.errors}</strong> erro(s)
+            </span>
+          </div>
+        )}
+
+        <button
+          onClick={handleGenerate}
+          disabled={mutation.isPending || !startDate || !endDate}
+          className="w-full flex items-center justify-center gap-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg px-4 py-2.5 transition-colors"
+        >
+          {mutation.isPending ? (
+            <><Loader2 size={14} className="animate-spin" /> Gerando...</>
+          ) : (
+            <><CalendarRange size={14} /> Gerar Snapshots</>
+          )}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Dashboard Page ─────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const snapshots  = useSnapshots(90)
   const allocation = useAllocation()
   const perf       = usePerformance()
   const dividends  = useDividends()
+  const [showGenModal, setShowGenModal] = useState(false)
 
-  // Guard: ignora snapshots sem snapshotDate válido antes de passar para o gráfico
   const chartData = useMemo(() => {
     if (!snapshots.data) return []
     return snapshots.data
@@ -96,19 +196,32 @@ export default function DashboardPage() {
       ? lastSnapshot.totalValue - prevSnapshot.totalValue
       : undefined
 
-  const totalDividends = dividends.data?.totalReceived ?? null
+  const totalDividends = dividends.data?.totalYear ?? null
 
   return (
     <div className="p-6 lg:p-8">
+      {showGenModal && <GenerateSnapshotsModal onClose={() => setShowGenModal(false)} />}
+
       <div className="mb-8">
-        <div className="flex items-center gap-2 text-[var(--color-text-muted)] text-xs mb-1">
-          <LayoutDashboard size={13} />
-          <span>Dashboard</span>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-[var(--color-text-muted)] text-xs mb-1">
+              <LayoutDashboard size={13} />
+              <span>Dashboard</span>
+            </div>
+            <h1 className="text-xl font-semibold">Visão Geral</h1>
+            <p className="text-sm text-[var(--color-text-muted)] mt-0.5">
+              Resumo atualizado da sua carteira
+            </p>
+          </div>
+          <button
+            onClick={() => setShowGenModal(true)}
+            className="hidden sm:flex items-center gap-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] border border-[var(--color-border-subtle)] rounded-lg px-3 py-2 transition-colors"
+          >
+            <CalendarRange size={13} />
+            Gerar Snapshots
+          </button>
         </div>
-        <h1 className="text-xl font-semibold">Visão Geral</h1>
-        <p className="text-sm text-[var(--color-text-muted)] mt-0.5">
-          Resumo atualizado da sua carteira
-        </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
@@ -130,11 +243,12 @@ export default function DashboardPage() {
           subtitle={perf.data ? `Capital: ${fmt.currency(perf.data.totalInvested)}` : undefined}
         />
         <KpiCard
-          label="Proventos Recebidos"
+          label="Proventos no Ano"
           value={totalDividends}
           format="currency"
           icon={HandCoins}
           loading={dividends.isLoading}
+          subtitle={dividends.data ? `Média: ${fmt.currency(dividends.data.avgPerMonth)}/mês` : undefined}
         />
         <KpiCard
           label="Resultado Líquido"
@@ -164,15 +278,16 @@ export default function DashboardPage() {
           )}
 
           {!snapshots.isLoading && !snapshots.isError && chartData.length === 0 && (
-            <div className="h-52 flex flex-col items-center justify-center gap-2 text-[var(--color-text-faint)]">
+            <div className="h-52 flex flex-col items-center justify-center gap-3 text-[var(--color-text-faint)]">
               <BarChart3 size={28} />
               <p className="text-sm">Nenhum snapshot encontrado.</p>
-              <p className="text-xs">
-                Gere snapshots via{' '}
-                <code className="bg-[var(--color-surface-3)] px-1 rounded">
-                  POST /portfolio-snapshots/generate
-                </code>
-              </p>
+              <button
+                onClick={() => setShowGenModal(true)}
+                className="flex items-center gap-1.5 text-xs text-[var(--color-primary)] hover:text-[var(--color-primary-hover)] transition-colors"
+              >
+                <CalendarRange size={12} />
+                Gerar snapshots agora
+              </button>
             </div>
           )}
 

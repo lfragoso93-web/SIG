@@ -121,8 +121,37 @@ export type PerformanceData = {
   periodEnd: string
 }
 
+// Shape real retornado por GET /dividends/summary
+export type DividendEvent = {
+  ticker: string
+  assetClass: string
+  paymentDate: string
+  netAmount: number
+}
+
+export type DividendByClass = {
+  code: string
+  total: number
+}
+
+export type DividendByMonth = {
+  month: string        // "YYYY-MM"
+  total: number
+  byClass: DividendByClass[]
+  events: DividendEvent[]
+}
+
+export type DividendAvgPerYear = {
+  year: number
+  total: number
+  avgPerMonth: number
+}
+
 export type DividendSummary = {
-  totalReceived: number
-  byPeriod: { period: string; total: number }[]
-  byType: { type: string; total: number }[]
+  year: number
+  totalYear: number
+  avgPerMonth: number
+  byMonth: DividendByMonth[]
+  last12Months: { month: string; total: number }[]
+  avgPerYear: DividendAvgPerYear[]
 }
