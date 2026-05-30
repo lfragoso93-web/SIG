@@ -1,6 +1,7 @@
-import express from 'express'
-import cors    from 'cors'
-import helmet  from 'helmet'
+import express    from 'express'
+import cors       from 'cors'
+import helmet     from 'helmet'
+import cookieParser from 'cookie-parser'
 
 import { authRouter }               from './modules/auth/auth.routes'
 import { assetClassesRouter }       from './modules/asset-classes/asset-classes.routes'
@@ -29,7 +30,18 @@ const PORT = Number(process.env.PORT ?? 3001)
 const HOST = '0.0.0.0'
 
 app.use(helmet())
-app.use(cors({ origin: process.env.CORS_ORIGIN ?? '*' }))
+
+// CORS: origin explícita + credentials:true são obrigatórios para
+// o browser enviar cookies HttpOnly via withCredentials:true no Axios.
+// NUNCA use origin:'*' com credentials:true — o browser rejeita.
+app.use(cors({
+  origin:      process.env.CORS_ORIGIN ?? 'http://localhost:3000',
+  credentials: true,
+}))
+
+// cookie-parser precisa vir antes das rotas para que req.cookies
+// esteja disponível no middleware authenticate.
+app.use(cookieParser())
 app.use(express.json())
 
 app.get('/health', (_req, res) => {

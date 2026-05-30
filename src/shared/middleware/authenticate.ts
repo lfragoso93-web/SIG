@@ -3,14 +3,13 @@ import { verifyToken } from '../../modules/auth/auth.service'
 import { AppError } from '../errors/AppError'
 
 export interface AuthPayload {
-  sub: string       // userId (cuid)
+  sub: string
   username: string
   role: string
   iat: number
   exp: number
 }
 
-// Estende o tipo Request do Express para incluir o usuário autenticado
 declare global {
   namespace Express {
     interface Request {
@@ -22,20 +21,25 @@ declare global {
 /**
  * Middleware de autenticação JWT.
  *
- * Uso: app.use('/rota-protegida', authenticate, router)
+ * Ordem de leitura do token:
+ *   1. Cookie HttpOnly `sig_token`  (preferencial — resistente a XSS)
+ *   2. Header `Authorization: Bearer <token>` (retrocompatibilidade / Postman / cron jobs)
  *
- * Lê o token do header: Authorization: Bearer <token>
  * Em caso de sucesso, anexa o payload tipado em req.user.
  */
 export function authenticate(req: Request, _res: Response, next: NextFunction) {
-  const authHeader = req.headers.authorization
-  if (!authHeader?.startsWith('Bearer ')) {
+  const cookieToken = (req.cookies as Record<string, string>)?.['sig_token']
+  const authHeader  = req.headers.authorization
+  const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : undefined
+
+  const token = cookieToken ?? headerToken
+
+  if (!token) {
     return next(new AppError('Token de autenticação não informado.', 401))
   }
 
-  const token = authHeader.split(' ')[1]
   try {
-    const payload = verifyToken(token!) as AuthPayload
+    const payload = verifyToken(token) as AuthPayload
     req.user = payload
     next()
   } catch {
