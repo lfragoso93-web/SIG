@@ -1,6 +1,6 @@
 # SGFP — Sistema de Gestão de Finanças Pessoais
 
-Plataforma pessoal de gestão financeira com foco em investimentos. Permite cadastrar ativos (ações, FIIs, ETFs, BDRs, Tesouro Direto e renda fixa privada), registrar transações, importar histórico de preços e proventos automaticamente, calcular snapshots do portfólio, medir performance, calcular IRPF e visualizar tudo em um frontend moderno.
+Plataforma pessoal de gestão financeira com foco em investimentos. Permite cadastrar ativos (ações, FIIs, ETFs, BDRs, Tesouro Direto e renda fixa privada), registrar transações, importar histórico de preços e proventos automaticamente, calcular snapshots do portfólio, medir performance, calcular IRPF e visualizar tudo em um frontend moderno. Suporta **múltiplos usuários** com carteiras isoladas.
 
 > 📌 **Documentação viva** — este README reflete o estado real do projeto. Atualize sempre que implementar, corrigir ou planejar algo.
 
@@ -15,7 +15,7 @@ Plataforma pessoal de gestão financeira com foco em investimentos. Permite cada
 | ORM | Prisma 6 |
 | Banco de dados | PostgreSQL |
 | Frontend | Next.js 15 (App Router) + Tailwind CSS v4 |
-| Autenticação | JWT (Bearer token) — usuário criado via seed |
+| Autenticação | JWT via cookie HttpOnly — same-origin via proxy Next.js |
 | Validação (API) | Zod |
 | Agendamento | node-cron |
 | Cotações B3 | **BRAPI** (principal — ações, FIIs, ETFs, BDRs) |
@@ -32,29 +32,29 @@ Plataforma pessoal de gestão financeira com foco em investimentos. Permite cada
 sgfp/
 ├── src/                        # API Express + TypeScript
 │   ├── modules/                # Módulos de domínio
-│   │   ├── auth/
+│   │   ├── auth/               # Login, logout, JWT
 │   │   ├── asset-classes/
 │   │   ├── assets/
-│   │   ├── transactions/
+│   │   ├── transactions/       # Multi-tenant: filtra por userId
 │   │   ├── price-history/
 │   │   ├── income-events/
 │   │   ├── portfolio-items/
-│   │   ├── portfolio-snapshots/
+│   │   ├── portfolio-snapshots/ # Multi-tenant: snapshots por userId
 │   │   ├── allocation/
-│   │   ├── performance/
+│   │   ├── performance/        # Multi-tenant: performance por userId
 │   │   ├── dividends/
 │   │   ├── treasury/
 │   │   ├── fixed-income/
-│   │   └── irpf/               # ← NOVO: motor de cálculo IRPF
+│   │   └── irpf/
 │   ├── jobs/                   # Crons automáticos (preços, proventos, snapshots, accrual)
 │   ├── providers/              # Integrações externas
-│   │   ├── brapi/              # BRAPI — cotações B3 e taxas macro
+│   │   ├── brapi/
 │   │   └── yahoo/
 │   │       ├── quote.provider.ts   # Estratégia: Brapi primário → Yahoo fallback
 │   │       └── yahoo.client.ts
 │   └── shared/                 # Middlewares, erros, utilitários
 ├── prisma/
-│   ├── schema.prisma           # Schema completo do banco
+│   ├── schema.prisma           # Schema completo (multi-tenant com userId)
 │   ├── migrations/             # Histórico de migrações
 │   └── seed.ts                 # Seed do usuário admin
 ├── web/                        # Frontend Next.js
@@ -67,21 +67,18 @@ sgfp/
 │   │       ├── fixed-income/
 │   │       ├── transactions/
 │   │       ├── allocation/
-│   │       └── irpf/           # ← NOVO: página IRPF
+│   │       └── irpf/
 │   ├── lib/
-│   │   ├── api.ts              # Cliente Axios com interceptors JWT / 401
-│   │   ├── auth.ts             # authService (login, logout, token)
-│   │   ├── types/
-│   │   │   └── irpf.ts         # ← NOVO: tipos TypeScript do módulo IRPF
+│   │   ├── api.ts              # Cliente Axios — baseURL=/api (proxy same-origin)
+│   │   ├── auth.ts             # authService (login, logout, sig_auth flag)
 │   │   └── hooks/
 │   │       ├── useDashboard.ts
 │   │       ├── usePortfolio.ts
 │   │       ├── useTreasury.ts
 │   │       ├── useFixedIncome.ts
-│   │       └── useIrpf.ts      # ← NOVO: hook React Query para IRPF
-│   └── components/
-│       └── transactions/
-│           └── NewTransactionDrawer.tsx
+│   │       └── useIrpf.ts
+│   ├── middleware.ts            # Proteção de rotas — verifica sig_token ou sig_auth
+│   └── next.config.ts          # Proxy rewrites: /api/* → http://api:3000/*
 └── docker-compose.yml
 ```
 
@@ -115,10 +112,11 @@ INITIAL_ADMIN_USERNAME=admin
 INITIAL_ADMIN_PASSWORD=SuaSenhaForte123
 
 # CORS — origem do browser
-CORS_ORIGIN=http://localhost:3001
+CORS_ORIGIN=http://localhost:3000
 
 # Frontend (Next.js — roda na porta 3000)
-NEXT_PUBLIC_API_URL=http://localhost:3001
+# NEXT_PUBLIC_API_URL não é mais necessária para o browser (proxy same-origin)
+# INTERNAL_API_URL é usada apenas pelo proxy server-side do Next.js
 INTERNAL_API_URL=http://api:3001
 WEB_PORT=3000
 
@@ -130,21 +128,24 @@ GEMINI_API_KEY=sua-chave-gemini
 SERPER_API_KEY=sua-chave-serper
 ```
 
-> ⚠️ `NEXT_PUBLIC_API_URL` é incorporada **no build** do Next.js. Mudanças exigem `docker compose build web`.
-> ⚠️ Sem `INITIAL_ADMIN_PASSWORD` definida, o seed não cria o usuário admin.
-
 ### 2. Suba os containers
 
 ```bash
 docker compose up -d
 ```
 
-### 3. Crie o usuário admin
+### 3. Aplique as migrations e crie o usuário admin
 
 ```bash
+# Aplica todas as migrations (incluindo a multi-tenant)
+docker compose exec api npx prisma migrate deploy
+
+# Regenera o Prisma Client
+docker compose exec api npx prisma generate
+
+# Cria o usuário admin via seed
 # PowerShell (Windows)
 docker compose exec api node -e "require('child_process').execSync('npx tsx prisma/seed.ts', {stdio:'inherit'})"
-
 # Linux / macOS
 docker compose exec api npx tsx prisma/seed.ts
 ```
@@ -154,22 +155,31 @@ docker compose exec api npx tsx prisma/seed.ts
 | Serviço | URL |
 |---|---|
 | Frontend | http://localhost:3000 |
-| API | http://localhost:3001 |
+| API (direto) | http://localhost:3001 |
+| API (via proxy) | http://localhost:3000/api |
 | Health check | http://localhost:3001/health |
 
 ---
 
 ## Autenticação
 
-O SGFP usa autenticação por JWT. Não há registro público — o usuário admin é criado via seed.
+O SGFP usa JWT armazenado em cookie HttpOnly. O frontend acessa a API exclusivamente via proxy (`/api/*` → `http://api:3001/*`), garantindo **same-origin** em qualquer device — incluindo mobile — sem problemas de CORS ou `SameSite`.
 
 ### Fluxo
 
-1. `POST /auth/login` com `{ username, password }` → retorna `{ token, expiresIn }`
-2. O token é armazenado em `localStorage` e cookie (`sig_token`, 8h)
-3. O cliente Axios injeta `Authorization: Bearer <token>` em toda requisição
-4. Em resposta `401`, o interceptor remove o token e redireciona para `/login`
-5. O middleware Next.js protege rotas por navegação SSR
+```
+Browser → POST /api/auth/login
+  Next.js reescreve → http://api:3001/auth/login
+  API responde com:
+    Set-Cookie: sig_token=<JWT>; HttpOnly; SameSite=Lax  ← cookie seguro
+    body: { token, expiresIn }                           ← retrocompatibilidade
+  Frontend seta sig_auth=1 (cookie JS legível pelo middleware)
+```
+
+1. Cookie `sig_token` (HttpOnly) — lido pela API em toda requisição
+2. Cookie `sig_auth` (JS-readable) — lido pelo middleware Next.js para proteger rotas
+3. Em resposta `401`, o interceptor Axios limpa `sig_auth` e redireciona para `/login`
+4. O middleware Next.js bloqueia acesso direto a rotas protegidas sem os cookies
 
 ### Testar login via PowerShell
 
@@ -178,6 +188,63 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:3001/auth/login" `
   -ContentType "application/json" `
   -Body '{"username":"admin","password":"SuaSenhaForte123"}'
 ```
+
+---
+
+## Multi-Tenant — Carteiras por Usuário
+
+O sistema suporta múltiplos usuários com carteiras completamente isoladas. Cada registro financeiro pertence a um usuário e é filtrado automaticamente a partir do JWT.
+
+### Tabelas com `userId`
+
+| Tabela | Isolada por usuário |
+|---|---|
+| `Account` | ✅ |
+| `Transaction` | ✅ |
+| `IncomeEvent` | ✅ |
+| `PortfolioItem` | ✅ |
+| `PortfolioSnapshot` | ✅ |
+| `AllocationTarget` | ✅ |
+| `Asset`, `AssetClass`, `PriceHistory` | ❌ Compartilhados (catálogo global) |
+
+### Roles
+
+| Role | Descrição |
+|---|---|
+| `ADMIN` | Acesso total — pode gerenciar outros usuários e dados globais |
+| `VIEWER` | Acesso à própria carteira apenas — role padrão para novos usuários |
+
+### Migration de preservação de dados
+
+A migration `20260530_multi_tenant_add_userid` usa estratégia de 3 passos para não perder dados existentes:
+
+```sql
+-- 1. Adiciona userId nullable (não quebra nada)
+ALTER TABLE "Transaction" ADD COLUMN "userId" TEXT;
+
+-- 2. Popula com o id do primeiro ADMIN (dados existentes ficam intactos)
+UPDATE "Transaction" SET "userId" = admin_id WHERE "userId" IS NULL;
+
+-- 3. Torna NOT NULL + FK + índices
+ALTER TABLE "Transaction" ALTER COLUMN "userId" SET NOT NULL;
+```
+
+### Módulos com refatoração multi-tenant concluída
+
+- [x] `transactions` — create, findAll, findById, update, remove
+- [x] `portfolio-snapshots` — generateSnapshot, generateSnapshotRange, listSnapshots, getSnapshotByDate
+- [x] `performance` — getSummary, getTimeline, getByClass
+
+### Módulos pendentes de refatoração
+
+- [ ] `income-events`
+- [ ] `dividends`
+- [ ] `accounts`
+- [ ] `allocation`
+- [ ] `portfolio-items`
+- [ ] `irpf`
+- [ ] `treasury`
+- [ ] `fixed-income`
 
 ---
 
@@ -192,12 +259,13 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:3001/auth/login" `
 | `JWT_EXPIRES` | api | ✅ | TTL do token (ex: `8h`) |
 | `INITIAL_ADMIN_USERNAME` | api (seed) | ✅ | Username do admin |
 | `INITIAL_ADMIN_PASSWORD` | api (seed) | ✅ | Senha do admin |
-| `CORS_ORIGIN` | api | ✅ | Origem do browser |
+| `CORS_ORIGIN` | api | ✅ | Origem do browser (ex: `http://localhost:3000`) |
 | `BRAPI_TOKEN` | api | ✅ | Token BRAPI para cotações |
-| `NEXT_PUBLIC_API_URL` | web (build) | ✅ | URL da API usada pelo browser |
-| `INTERNAL_API_URL` | web (SSR) | ✅ | URL da API usada pelo servidor Next.js |
+| `INTERNAL_API_URL` | web (proxy) | ✅ | URL interna da API usada pelo proxy Next.js |
 | `GEMINI_API_KEY` | api (futuro) | — | Google Gemini — análise de carteira com IA |
 | `SERPER_API_KEY` | api (futuro) | — | Serper — busca de notícias e relatórios gerenciais |
+
+> ⚠️ `NEXT_PUBLIC_API_URL` foi removida. O browser nunca acessa a API diretamente — tudo passa pelo proxy `/api/*`.
 
 ---
 
@@ -226,7 +294,7 @@ Ticker (ex: PETR4)
 
 | Módulo | Prefixo | Descrição |
 |---|---|---|
-| Auth | `/auth` | Login e geração de JWT |
+| Auth | `/auth` | Login, logout e geração de JWT |
 | Asset Classes | `/asset-classes` | Classificação de ativos |
 | Assets | `/assets` | Cadastro de ativos |
 | Transactions | `/transactions` | Compras, vendas e movimentos |
@@ -239,21 +307,14 @@ Ticker (ex: PETR4)
 | Dividends | `/dividends` | Resumo de proventos por período |
 | Treasury | `/treasury` | Tesouro Direto — P&L, IR, IOF, resgate |
 | Fixed Income | `/fixed-income` | Renda Fixa — accrual, IR/IOF, isenção |
-| **IRPF** | **`/irpf`** | **Cálculo de IR por ano-calendário** |
+| IRPF | `/irpf` | Cálculo de IR por ano-calendário |
 | Health | `/health` | Status da API |
 
-Todos os endpoints (exceto `/auth/*` e `/health`) exigem:
-```
-Authorization: Bearer <token>
-```
+Todos os endpoints (exceto `/auth/*` e `/health`) exigem autenticação via cookie `sig_token` ou header `Authorization: Bearer <token>`.
 
 ---
 
 ## Módulo IRPF
-
-### Visão geral
-
-O módulo IRPF calcula, do lado do servidor, todas as obrigações fiscais de renda variável brasileira para um dado ano-calendário, com base nas transações registradas no sistema.
 
 ### Endpoint
 
@@ -282,19 +343,8 @@ Retorna um objeto `IrpfSummary` com:
 
 - **Custo médio ponderado** calculado com todo o histórico de BUYs (não só do ano)
 - **Day trade detectado automaticamente**: mesmo `assetId` com BUY e SELL na mesma data
-- **Compensação de prejuízos sequencial por classe**: saldo de Ações não compensa FIIs (e vice-versa)
-- **DARFs**: geradas por mês × grupo (Renda Variável / FIIs / Day Trade), com vencimento no último dia do mês seguinte
-- Renda Fixa e Tesouro Direto têm IR retido na fonte — **não aparecem no ganho de capital**
-
-### Página frontend `/irpf`
-
-- Seletor de ano-calendário (últimos 6 anos, padrão = ano anterior)
-- **4 KPIs**: IR total devido, IR retido na fonte, rendimentos isentos, saldo de prejuízo acumulado
-- **Seção Ganho de Capital**: tabela mês × classe com receita de venda, custo, lucro/prejuízo, compensado, base de cálculo, alíquota e IR
-- **Seção DARFs**: competência, grupo, base, alíquota, valor a recolher e vencimento
-- **Seção Rendimentos**: dividendos isentos, FII_INCOME isento, JCP tributável com IR retido
-- **Seção Bens e Direitos**: posição atual com custo médio × quantidade = valor a declarar
-- Disclaimer destacando que Renda Fixa e Tesouro têm IR retido na fonte
+- **Compensação de prejuízos sequencial por classe**
+- **DARFs** geradas por mês × grupo com vencimento no último dia do mês seguinte
 
 ---
 
@@ -337,7 +387,7 @@ for ($i = 90; $i -ge 0; $i--) {
     $date = $today.AddDays(-$i).ToString("yyyy-MM-dd")
     try {
         Invoke-RestMethod -Method Post `
-          -Uri "http://localhost:3001/portfolio-snapshots/generate" `
+          -Uri "http://localhost:3000/api/portfolio-snapshots/generate" `
           -Headers $headers `
           -ContentType "application/json" `
           -Body ('{"referenceDate":"' + $date + '","period":"DAILY"}')
@@ -349,7 +399,7 @@ for ($i = 90; $i -ge 0; $i--) {
 }
 ```
 
-> ℹ️ Datas sem preço disponível (fins de semana / feriados) retornarão `SKIP` — comportamento esperado.
+> ℹ️ O proxy Next.js está em `http://localhost:3000/api`. Datas sem preço disponível retornarão `SKIP` — comportamento esperado.
 
 ---
 
@@ -366,18 +416,18 @@ npx prisma generate
 
 ### Models principais
 
-| Model | Descrição |
-|---|---|
-| `User` | Usuário do sistema |
-| `AssetClass` | Classificação macro dos ativos |
-| `Asset` | Ativo individual — ticker, nome, classe |
-| `Transaction` | Compras, vendas e movimentos |
-| `PriceHistory` | OHLCV diário por ativo |
-| `IncomeEvent` | Proventos recebidos |
-| `PortfolioItem` | Posição consolidada por ativo |
-| `PortfolioSnapshot` | Fotografia do portfólio (DAILY/WEEKLY/MONTHLY) |
-| `AllocationTarget` | Meta de alocação por classe |
-| `Account` | Contas por instituição |
+| Model | Descrição | Multi-tenant |
+|---|---|---|
+| `User` | Usuário do sistema | — |
+| `AssetClass` | Classificação macro dos ativos | Global |
+| `Asset` | Ativo individual — ticker, nome, classe | Global |
+| `Transaction` | Compras, vendas e movimentos | ✅ por `userId` |
+| `PriceHistory` | OHLCV diário por ativo | Global |
+| `IncomeEvent` | Proventos recebidos | ✅ por `userId` |
+| `PortfolioItem` | Posição consolidada por ativo | ✅ por `userId` |
+| `PortfolioSnapshot` | Fotografia do portfólio (DAILY/WEEKLY) | ✅ por `userId` |
+| `AllocationTarget` | Meta de alocação por classe | ✅ por `userId` |
+| `Account` | Contas por instituição | ✅ por `userId` |
 
 ---
 
@@ -406,26 +456,11 @@ npx prisma generate
 
 > ⚠️ Tokens `--color-surface-3`, `--color-primary-active` e `--color-error-muted` estão referenciados no código mas ainda não definidos em `globals.css`. Pendente de correção.
 
-### Hooks de dados
-
-| Hook | Arquivo | Endpoints chamados |
-|---|---|---|
-| `useSnapshots` | `useDashboard.ts` | `GET /portfolio-snapshots` |
-| `useAllocation` | `useDashboard.ts` | `POST /allocation/calculate` |
-| `usePerformance` | `useDashboard.ts` | `GET /performance/summary` |
-| `useDividends` | `useDashboard.ts` | `GET /dividends/summary` |
-| `usePortfolioItems` | `usePortfolio.ts` | `GET /portfolio-items` |
-| `useAllocation` | `usePortfolio.ts` | `POST /allocation/calculate` |
-| `usePerformance` | `usePortfolio.ts` | `GET /performance/summary` |
-| `useTreasury` | `useTreasury.ts` | `GET /treasury` |
-| `useFixedIncome` | `useFixedIncome.ts` | `GET /fixed-income` |
-| **`useIrpf(year)`** | **`useIrpf.ts`** | **`GET /irpf?year=YYYY`** |
-
 ### Rotas
 
 | Rota | Status | Descrição |
 |---|---|---|
-| `/login` | ✅ Implementado | Tela de login |
+| `/login` | ✅ Implementado | Tela de login com cookie HttpOnly |
 | `/` | ✅ Implementado | Dashboard — KPIs, evolução patrimonial, alocação |
 | `/transactions` | ✅ Implementado | Histórico de transações com gráfico de movimentações |
 | `/irpf` | ✅ Implementado | IRPF — ganho de capital, DARFs, rendimentos, bens e direitos |
@@ -440,54 +475,44 @@ npx prisma generate
 ## Problemas Resolvidos
 
 ### Login sem usuário no banco
-
-**Causa:** `docker-compose.yml` usava `APP_USERNAME`/`APP_PASSWORD` (nomenclatura antiga) em vez de `INITIAL_ADMIN_USERNAME`/`INITIAL_ADMIN_PASSWORD`.
+**Causa:** `docker-compose.yml` usava `APP_USERNAME`/`APP_PASSWORD` em vez de `INITIAL_ADMIN_USERNAME`/`INITIAL_ADMIN_PASSWORD`.
 **Solução:** Atualizar variáveis no `docker-compose.yml` e `.env`, recriar container e rodar seed.
 
 ### Migrations não aplicadas no container
-
 **Causa:** `Dockerfile` não copiava `prisma/migrations` para o estágio `runner`.
 **Solução:** Adicionar `COPY --from=builder /app/prisma ./prisma` no estágio `runner`.
 
+### Login não funcionava no celular (mobile)
+**Causa:** API (porta 3001) e frontend (porta 3000) eram origens diferentes. O browser bloqueava o cookie `sig_token` com `SameSite=Lax` ao cruzar origens.
+**Solução:** Proxy transparente via `next.config.ts` rewrites (`/api/*` → `http://api:3001/*`). Agora tudo é same-origin. `baseURL` do Axios foi alterada para `/api`.
+
+### Middleware Next.js não bloqueava rotas sem login
+**Causa:** O middleware verificava cookie `sig_token` que nunca chegava ao Edge Runtime pois era emitido por origem diferente.
+**Solução:** Com o proxy same-origin resolvido, o cookie chega corretamente. Cookie auxiliar `sig_auth` adicionado como flag legível pelo middleware.
+
 ### Erro de CORS no login pelo browser
-
-**Causa:** `CORS_ORIGIN=http://web:3001` (endereço interno Docker). O browser envia `Origin: http://localhost:3001`.
-**Solução:** Alterar `CORS_ORIGIN` para `http://localhost:3001` no `.env`.
-
-### baseURL do Axios apontando para porta errada
-
-**Causa:** Fallback de `API_URL` em `web/lib/api.ts` estava como `http://localhost:3000` (porta do Next.js).
-**Solução:** Corrigir fallback para `http://localhost:3001`.
+**Causa:** `CORS_ORIGIN` apontava para endereço interno Docker (`http://web:3001`).
+**Solução:** Alterar `CORS_ORIGIN` para `http://localhost:3000`.
 
 ### queryKeys conflitantes entre useDashboard e usePortfolio
-
 **Causa:** Hooks duplicados usavam as mesmas `queryKey`s, causando colisão de cache no React Query.
-**Solução:** Prefixar queryKeys de `usePortfolio.ts` com `portfolio-` (`portfolio-allocation`, `portfolio-performance`).
+**Solução:** Prefixar queryKeys de `usePortfolio.ts` com `portfolio-`.
 
 ### Gráficos da dashboard em empty state
-
-**Causa:** Snapshots DAILY gerados com datas de 2024, fora do intervalo dos últimos 90 dias.
-**Solução:** Executar script PowerShell de geração retroativa (ver seção *Jobs Automáticos*).
+**Causa:** Snapshots DAILY gerados com datas antigas, fora do intervalo dos últimos 90 dias.
+**Solução:** Script PowerShell de geração retroativa (ver seção *Jobs Automáticos*).
 
 ### Cotações exigindo sufixo `.SA`
-
-**Causa:** Yahoo Finance exige `.SA` para tickers B3, tornando o fluxo inconsistente.
-**Solução:** Criação de `quote.provider.ts` com estratégia Brapi primário → Yahoo fallback.
+**Causa:** Yahoo Finance exige `.SA` para tickers B3.
+**Solução:** `quote.provider.ts` com estratégia Brapi primário → Yahoo fallback.
 
 ### SyntaxError no SWC — mistura de `||` com `??`
-
 **Causa:** SWC rejeita expressões que misturam `||` e `??` sem parênteses explícitos.
-**Solução:** Extrair a subexpressão com `??` para variável separada em `NewTransactionDrawer.tsx`.
+**Solução:** Extrair a subexpressão com `??` para variável separada.
 
 ### TypeScript errors no irpf.service.ts (build Docker)
-
-**Causa:** 3 erros de tipo:
-1. `assetId: { not: null }` — Prisma não aceita `null` no filtro `not`
-2. `ev.asset` inferido como inexistente por guard `if (!ev.asset)` desnecessário — `assetId` é não-nulo no schema
-
-**Solução:**
-- Trocar `{ not: null }` por `{ not: undefined }`
-- Remover guard `if (!ev.asset)` e reescrever lógica de `incomeMap` com verificação de `existing` explícita
+**Causa:** `assetId: { not: null }` — Prisma não aceita `null` no filtro `not`; guard desnecessário em `ev.asset`.
+**Solução:** Trocar `{ not: null }` por `{ not: undefined }` e remover guard redundante.
 
 ---
 
@@ -544,9 +569,10 @@ npx prisma generate
 - [x] Endpoints de alocação, performance e dividendos
 - [x] Módulo Tesouro Direto — P&L (WAVG), IR/IOF, cron radaropcoes, resgate
 - [x] Módulo Renda Fixa Privada — accrual por indexador, IR/IOF, isenção, resgate
-- [x] Autenticação JWT com usuário criado via seed
+- [x] Autenticação JWT com cookie HttpOnly
 - [x] `quote.provider.ts` — estratégia Brapi primário / Yahoo Finance fallback
-- [x] **Módulo IRPF** — `GET /irpf?year=YYYY` com ganho de capital, compensação de prejuízos, day trade automático, rendimentos, bens e DARFs
+- [x] Módulo IRPF — `GET /irpf?year=YYYY`
+- [x] **Multi-tenant (Fase 1 parcial)** — `userId` no schema + migration + transactions, snapshots e performance refatorados
 
 ### ✅ Concluído — Frontend
 
@@ -554,21 +580,21 @@ npx prisma generate
 - [x] Design system próprio — tokens CSS, paleta dark, tipografia Geist
 - [x] Tela de login com validação
 - [x] Layout do dashboard com sidebar responsiva
-- [x] Cliente Axios com interceptors JWT e redirect em 401
-- [x] Middleware Next.js para proteção de rotas
-- [x] **Dashboard** — KPIs reais, gráfico de evolução (90 dias), gráfico de alocação
-- [x] `NewTransactionDrawer` — wizard 4 passos com busca Brapi/Yahoo e cadastro automático de ativo
-- [x] **Página de Transações** — histórico mensal com gráfico de movimentações
-- [x] **Página IRPF** — ganho de capital, DARFs, rendimentos, bens e direitos, seletor de ano
-- [x] `useIrpf(year)` — hook React Query para o módulo IRPF
-- [x] `web/lib/types/irpf.ts` — tipos TypeScript do módulo IRPF
+- [x] **Proxy same-origin** — `next.config.ts` rewrites + Axios `baseURL=/api`
+- [x] Cookie HttpOnly funcionando em qualquer device/browser
+- [x] Middleware Next.js protegendo rotas (corrigido para funcionar em mobile)
+- [x] Dashboard — KPIs reais, gráfico de evolução (90 dias), gráfico de alocação
+- [x] `NewTransactionDrawer` — wizard 4 passos com busca Brapi/Yahoo
+- [x] Página de Transações — histórico mensal com gráfico
+- [x] Página IRPF — ganho de capital, DARFs, rendimentos, bens e direitos
 
 ### 🔴 Alta Prioridade
 
-- [ ] **Renomear projeto de SIG para SGFP** — ver checklist abaixo
+- [ ] **Multi-tenant (Fase 1 — concluir)** — refatorar `income-events`, `dividends`, `accounts`, `allocation`, `portfolio-items`, `irpf`, `treasury`, `fixed-income`
+- [ ] **Fase 2 — Cadastro de usuário** — `POST /auth/register` com username/email/senha + tela de cadastro no frontend
 - [ ] **Corrigir tokens CSS inconsistentes** — `--color-surface-3`, `--color-primary-active`, `--color-error-muted`
 - [ ] **Tesouro Direto — import histórico via CSV** (Tesouro Transparente)
-- [ ] **Adicionar link IRPF no menu lateral** — sidebar ainda não tem o item
+- [ ] **Adicionar link IRPF no menu lateral**
 
 ### 🟡 Média Prioridade
 
@@ -576,7 +602,8 @@ npx prisma generate
 - [ ] Página `/treasury` — tabela de títulos com P&L líquido
 - [ ] Página `/fixed-income` — accrual, isenção, status de vencimento
 - [ ] Página `/allocation` — gráfico pizza interativo
-- [ ] **Página `/analysis` — Análise inteligente da carteira** (ver seção abaixo)
+- [ ] Página `/analysis` — Análise inteligente da carteira
+- [ ] **Fase 3 — Login com Google OAuth** — NextAuth.js + provider Google + criação automática de usuário por e-mail
 - [ ] IRR / XIRR — retorno real considerando timing de aportes
 - [ ] Benchmark — comparar carteira vs. CDI, IBOV e IPCA
 - [ ] Dark/light mode toggle
@@ -586,11 +613,35 @@ npx prisma generate
 
 - [ ] Importação via nota de corretagem (PDF/XLSX)
 - [ ] Alertas de preço (e-mail ou webhook)
-- [ ] Multi-carteira por usuário
 - [ ] Proventos previstos (calendário futuro)
 - [ ] Rate limiting nos endpoints públicos
 - [ ] Logs estruturados (Winston/Pino)
 - [ ] CI/CD com GitHub Actions
+- [ ] **Renomear projeto de SIG para SGFP** — ver checklist abaixo
+
+---
+
+## Fase 3 — Login com Google OAuth (Planejado)
+
+Dependência: Fase 1 e Fase 2 concluídas.
+
+**Fluxo pretendido:**
+```
+Usuário clica "Entrar com Google" na tela de login
+  → NextAuth.js redireciona para Google OAuth
+  → Google retorna email + nome
+  → Backend verifica se User existe pelo email
+    → Existe: atualiza lastLoginAt e emite JWT
+    → Não existe: cria User (role=VIEWER) e emite JWT
+  → Cookie sig_token setado normalmente (mesmo fluxo)
+```
+
+**O que é necessário:**
+- Conta Google Cloud Console com projeto OAuth configurado
+- `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` no `.env`
+- `NextAuth.js` instalado no frontend (`web/`)
+- Campo `email` já existe no modelo `User` (adicionado na migration multi-tenant)
+- Endpoint `POST /auth/google` no backend para receber o token Google e emitir JWT
 
 ---
 
@@ -603,8 +654,6 @@ Abordagem híbrida em duas camadas:
 ```
 GET /analysis/portfolio  →  sinais automáticos por ativo
 ```
-
-Cada ativo recebe um **score** e lista de **sinais** baseados nos dados internos:
 
 | Sinal | Fonte |
 |---|---|
@@ -621,14 +670,11 @@ Cada ativo recebe um **score** e lista de **sinais** baseados nos dados internos
 POST /analysis/ai  →  { ticker }  →  análise em linguagem natural
 ```
 
-**Fluxo:**
 1. Monta contexto interno (posição, custo médio, rentabilidade, proventos)
 2. Busca na web via **Serper API** — relatórios gerenciais (RI), notícias e resultados trimestrais
-3. Envia contexto + web search para **Google Gemini 2.0 Flash** (gratuito)
-4. Retorna análise em português com: tese, pontos positivos, riscos e recomendação
-5. Salva resultado em cache no PostgreSQL (`ai_analysis_cache`) com TTL de 24h
-
-**Variáveis de ambiente necessárias:** `GEMINI_API_KEY` e `SERPER_API_KEY` (já documentadas acima)
+3. Envia contexto + web search para **Google Gemini 2.0 Flash**
+4. Retorna análise em português com tese, pontos positivos, riscos e recomendação
+5. Salva em cache no PostgreSQL (`ai_analysis_cache`) com TTL de 24h
 
 ---
 
@@ -639,7 +685,7 @@ POST /analysis/ai  →  { ticker }  →  análise em linguagem natural
 - [ ] `web/app/(dashboard)/layout.tsx` — logo e texto na sidebar
 - [ ] `web/app/layout.tsx` — metadata `title` e `description`
 - [ ] `web/middleware.ts` — cookie `sig_token` → `sgfp_token`
-- [ ] `web/lib/auth.ts` — constante `TOKEN_KEY = 'sig_token'` → `'sgfp_token'`
+- [ ] `web/lib/auth.ts` — constante `AUTH_FLAG_KEY = 'sig_auth'` → `'sgfp_auth'`
 
 ### Docker e infraestrutura
 - [ ] `docker-compose.yml` — `name: sig` → `name: sgfp`
@@ -650,7 +696,7 @@ POST /analysis/ai  →  { ticker }  →  análise em linguagem natural
 - [ ] `web/package.json` — `"name": "sig-web"` → `"sgfp-web"`
 
 ### Banco de dados
-- [ ] `POSTGRES_DB`: `sig_db` → `sgfp_db` (requer backup antes: `docker compose exec db pg_dump -U $APP_DB_USER $POSTGRES_DB > backup.sql`)
+- [ ] `POSTGRES_DB`: `sig_db` → `sgfp_db` (requer backup: `docker compose exec db pg_dump -U $APP_DB_USER $POSTGRES_DB > backup.sql`)
 
 ---
 
@@ -664,4 +710,4 @@ git push origin feat/nome-da-feature
 
 ---
 
-*SGFP v0.4.0 — uso pessoal*
+*SGFP v0.5.0 — uso pessoal*
