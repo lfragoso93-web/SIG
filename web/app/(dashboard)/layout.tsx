@@ -3,8 +3,8 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
-  TrendingUp, LayoutDashboard, Briefcase, Building2,
-  PiggyBank, ArrowLeftRight, PieChart, LogOut, Menu, X, Plus,
+  TrendingUp, LayoutDashboard, Briefcase,
+  ArrowLeftRight, PieChart, LogOut, Menu, X, Plus,
   HandCoins, Wallet, BarChart3,
 } from 'lucide-react'
 import { useState } from 'react'
@@ -13,15 +13,13 @@ import { NewTransactionDrawer } from '@/components/transactions/NewTransactionDr
 import { useAutoSnapshot } from '@/lib/hooks/useAutoSnapshot'
 
 const NAV = [
-  { href: '/',             label: 'Dashboard',     icon: LayoutDashboard },
-  { href: '/portfolio',    label: 'Portfólio',      icon: Briefcase       },
-  { href: '/patrimony',    label: 'Patrimônio',     icon: Wallet          },
-  { href: '/performance',  label: 'Rentabilidade',  icon: BarChart3       },
-  { href: '/dividends',    label: 'Proventos',      icon: HandCoins       },
-  { href: '/treasury',     label: 'Tesouro Direto', icon: Building2       },
-  { href: '/fixed-income', label: 'Renda Fixa',     icon: PiggyBank       },
-  { href: '/transactions', label: 'Transações',    icon: ArrowLeftRight  },
-  { href: '/allocation',   label: 'Alocação',      icon: PieChart        },
+  { href: '/',            label: 'Dashboard',    icon: LayoutDashboard },
+  { href: '/portfolio',   label: 'Portfólio',     icon: Briefcase       },
+  { href: '/patrimony',   label: 'Patrimônio',    icon: Wallet          },
+  { href: '/performance', label: 'Rentabilidade', icon: BarChart3       },
+  { href: '/dividends',   label: 'Proventos',     icon: HandCoins       },
+  { href: '/transactions',label: 'Transações',   icon: ArrowLeftRight  },
+  { href: '/allocation',  label: 'Alocação',      icon: PieChart        },
 ]
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
