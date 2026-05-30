@@ -176,7 +176,7 @@ export function useUpdateTransaction() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async ({ id, payload }: { id: string; payload: UpdateTransactionPayload }) => {
-      const { data } = await api.put(`/transactions/${id}`, payload)
+      const { data } = await api.patch(`/transactions/${id}`, payload)
       return data as Transaction
     },
     onSuccess: () => {
