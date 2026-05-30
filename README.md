@@ -1,6 +1,6 @@
 # SGFP — Sistema de Gestão de Finanças Pessoais
 
-Plataforma pessoal de gestão financeira com foco em investimentos. Permite cadastrar ativos (ações, FIIs, ETFs, BDRs, Tesouro Direto e renda fixa privada), registrar transações, importar histórico de preços e proventos automaticamente, calcular snapshots do portfólio, medir performance e visualizar tudo em um frontend moderno.
+Plataforma pessoal de gestão financeira com foco em investimentos. Permite cadastrar ativos (ações, FIIs, ETFs, BDRs, Tesouro Direto e renda fixa privada), registrar transações, importar histórico de preços e proventos automaticamente, calcular snapshots do portfólio, medir performance, calcular IRPF e visualizar tudo em um frontend moderno.
 
 > 📌 **Documentação viva** — este README reflete o estado real do projeto. Atualize sempre que implementar, corrigir ou planejar algo.
 
@@ -11,7 +11,7 @@ Plataforma pessoal de gestão financeira com foco em investimentos. Permite cada
 | Camada | Tecnologia |
 |---|---|
 | Runtime | Node.js 22 + TypeScript |
-| API Framework | NestJS |
+| API Framework | Express + Zod |
 | ORM | Prisma 6 |
 | Banco de dados | PostgreSQL |
 | Frontend | Next.js 15 (App Router) + Tailwind CSS v4 |
@@ -30,31 +30,59 @@ Plataforma pessoal de gestão financeira com foco em investimentos. Permite cada
 
 ```
 sgfp/
-├── src/                  # API NestJS
-│   ├── modules/          # Módulos de domínio (auth, assets, portfolio, treasury, fixed-income…)
-│   ├── jobs/             # Crons automáticos (preços, proventos, snapshots, accrual)
-│   ├── providers/        # Integrações externas
-│   │   ├── brapi/        # BRAPI — cotações B3 e taxas macro
+├── src/                        # API Express + TypeScript
+│   ├── modules/                # Módulos de domínio
+│   │   ├── auth/
+│   │   ├── asset-classes/
+│   │   ├── assets/
+│   │   ├── transactions/
+│   │   ├── price-history/
+│   │   ├── income-events/
+│   │   ├── portfolio-items/
+│   │   ├── portfolio-snapshots/
+│   │   ├── allocation/
+│   │   ├── performance/
+│   │   ├── dividends/
+│   │   ├── treasury/
+│   │   ├── fixed-income/
+│   │   └── irpf/               # ← NOVO: motor de cálculo IRPF
+│   ├── jobs/                   # Crons automáticos (preços, proventos, snapshots, accrual)
+│   ├── providers/              # Integrações externas
+│   │   ├── brapi/              # BRAPI — cotações B3 e taxas macro
 │   │   └── yahoo/
 │   │       ├── quote.provider.ts   # Estratégia: Brapi primário → Yahoo fallback
-│   │       └── yahoo.client.ts     # Cliente HTTP Yahoo Finance (mantido para retrocompat.)
-│   └── shared/           # Middlewares, erros, utilitários
+│   │       └── yahoo.client.ts
+│   └── shared/                 # Middlewares, erros, utilitários
 ├── prisma/
-│   ├── schema.prisma     # Schema completo do banco
-│   ├── migrations/       # Histórico de migrações
-│   └── seed.ts           # Seed do usuário admin
-├── web/                  # Frontend Next.js
+│   ├── schema.prisma           # Schema completo do banco
+│   ├── migrations/             # Histórico de migrações
+│   └── seed.ts                 # Seed do usuário admin
+├── web/                        # Frontend Next.js
 │   ├── app/
-│   │   ├── (auth)/login/ # Tela de login
-│   │   └── (dashboard)/  # Layout + páginas do painel
+│   │   ├── (auth)/login/
+│   │   └── (dashboard)/        # Layout + páginas do painel
+│   │       ├── page.tsx        # Dashboard
+│   │       ├── portfolio/
+│   │       ├── treasury/
+│   │       ├── fixed-income/
+│   │       ├── transactions/
+│   │       ├── allocation/
+│   │       └── irpf/           # ← NOVO: página IRPF
 │   ├── lib/
-│   │   ├── api.ts        # Cliente Axios com interceptors JWT / 401
-│   │   ├── auth.ts       # authService (login, logout, token)
-│   │   └── hooks/        # useDashboard, usePortfolio, useTreasury, useFixedIncome
+│   │   ├── api.ts              # Cliente Axios com interceptors JWT / 401
+│   │   ├── auth.ts             # authService (login, logout, token)
+│   │   ├── types/
+│   │   │   └── irpf.ts         # ← NOVO: tipos TypeScript do módulo IRPF
+│   │   └── hooks/
+│   │       ├── useDashboard.ts
+│   │       ├── usePortfolio.ts
+│   │       ├── useTreasury.ts
+│   │       ├── useFixedIncome.ts
+│   │       └── useIrpf.ts      # ← NOVO: hook React Query para IRPF
 │   └── components/
 │       └── transactions/
-│           └── NewTransactionDrawer.tsx  # Drawer de novo lançamento (wizard 4 passos)
-└── docker-compose.yml    # Orquestração: db + api + web
+│           └── NewTransactionDrawer.tsx
+└── docker-compose.yml
 ```
 
 ---
@@ -75,36 +103,35 @@ APP_DB_USER=sgfp_user
 APP_DB_PASSWORD=senha_segura
 DB_PORT=5432
 
-# API (NestJS — roda na porta 3000)
-PORT=3000
+# API (roda na porta 3001)
+PORT=3001
 NODE_ENV=development
 JWT_SECRET=sua-chave-secreta-longa
 JWT_EXPIRES=8h
-API_PORT=3000
+API_PORT=3001
 
 # Admin inicial (criado via seed)
 INITIAL_ADMIN_USERNAME=admin
 INITIAL_ADMIN_PASSWORD=SuaSenhaForte123
 
-# CORS — origem do browser (deve ser localhost, não o nome do container)
+# CORS — origem do browser
 CORS_ORIGIN=http://localhost:3001
 
-# Frontend (Next.js — roda na porta 3001)
-# NEXT_PUBLIC_API_URL é embutida no build; requer rebuild após mudança
-NEXT_PUBLIC_API_URL=http://localhost:3001/api
-INTERNAL_API_URL=http://api:3000
-WEB_PORT=3001
+# Frontend (Next.js — roda na porta 3000)
+NEXT_PUBLIC_API_URL=http://localhost:3001
+INTERNAL_API_URL=http://api:3001
+WEB_PORT=3000
 
 # BRAPI (cotações B3 + taxas CDI/SELIC/IPCA)
 BRAPI_TOKEN=seu-token-brapi
 
-# Docker
-DOCKER_NETWORK_NAME=sgfp_network
+# IA + Análise de carteira (módulo futuro)
+GEMINI_API_KEY=sua-chave-gemini
+SERPER_API_KEY=sua-chave-serper
 ```
 
 > ⚠️ `NEXT_PUBLIC_API_URL` é incorporada **no build** do Next.js. Mudanças exigem `docker compose build web`.
 > ⚠️ Sem `INITIAL_ADMIN_PASSWORD` definida, o seed não cria o usuário admin.
-> ⚠️ **Não confunda as portas:** Next.js = 3000 (interno), exposto na 3001; NestJS/API = 3001 (interno), exposto na 3000. Veja `docker-compose.yml` para os mapeamentos exatos.
 
 ### 2. Suba os containers
 
@@ -122,19 +149,13 @@ docker compose exec api node -e "require('child_process').execSync('npx tsx pris
 docker compose exec api npx tsx prisma/seed.ts
 ```
 
-Saída esperada:
-```
-[seed] Usuário 'admin' criado com sucesso.
-Seed concluído com sucesso.
-```
-
 ### 4. Acesse o sistema
 
 | Serviço | URL |
 |---|---|
-| Frontend | http://localhost:3001 |
-| API | http://localhost:3000 |
-| Health check | http://localhost:3000/health |
+| Frontend | http://localhost:3000 |
+| API | http://localhost:3001 |
+| Health check | http://localhost:3001/health |
 
 ---
 
@@ -148,22 +169,14 @@ O SGFP usa autenticação por JWT. Não há registro público — o usuário adm
 2. O token é armazenado em `localStorage` e cookie (`sig_token`, 8h)
 3. O cliente Axios injeta `Authorization: Bearer <token>` em toda requisição
 4. Em resposta `401`, o interceptor remove o token e redireciona para `/login`
-5. O middleware Next.js protege rotas por navegação SSR (bots/crawlers)
+5. O middleware Next.js protege rotas por navegação SSR
 
 ### Testar login via PowerShell
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri "http://localhost:3000/auth/login" `
+Invoke-RestMethod -Method Post -Uri "http://localhost:3001/auth/login" `
   -ContentType "application/json" `
   -Body '{"username":"admin","password":"SuaSenhaForte123"}'
-```
-
-### Testar login via curl (Linux / macOS)
-
-```bash
-curl -X POST http://localhost:3000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"SuaSenhaForte123"}'
 ```
 
 ---
@@ -178,17 +191,19 @@ curl -X POST http://localhost:3000/auth/login \
 | `JWT_SECRET` | api | ✅ | Chave de assinatura JWT |
 | `JWT_EXPIRES` | api | ✅ | TTL do token (ex: `8h`) |
 | `INITIAL_ADMIN_USERNAME` | api (seed) | ✅ | Username do admin |
-| `INITIAL_ADMIN_PASSWORD` | api (seed) | ✅ | Senha do admin — **obrigatória para o seed funcionar** |
-| `CORS_ORIGIN` | api | ✅ | Origem do browser (ex: `http://localhost:3001`) |
+| `INITIAL_ADMIN_PASSWORD` | api (seed) | ✅ | Senha do admin |
+| `CORS_ORIGIN` | api | ✅ | Origem do browser |
 | `BRAPI_TOKEN` | api | ✅ | Token BRAPI para cotações |
-| `NEXT_PUBLIC_API_URL` | web (build) | ✅ | URL da API usada pelo browser — embutida no build |
+| `NEXT_PUBLIC_API_URL` | web (build) | ✅ | URL da API usada pelo browser |
 | `INTERNAL_API_URL` | web (SSR) | ✅ | URL da API usada pelo servidor Next.js |
+| `GEMINI_API_KEY` | api (futuro) | — | Google Gemini — análise de carteira com IA |
+| `SERPER_API_KEY` | api (futuro) | — | Serper — busca de notícias e relatórios gerenciais |
 
 ---
 
 ## Estratégia de Cotações — Brapi + Yahoo Finance
 
-Todas as buscas de cotação passam por `src/providers/yahoo/quote.provider.ts`, que implementa uma estratégia em dois estágios:
+Todas as buscas de cotação passam por `src/providers/yahoo/quote.provider.ts`:
 
 ```
 Ticker (ex: PETR4)
@@ -202,17 +217,6 @@ Ticker (ex: PETR4)
        │ b) se não achar, tenta com .SA (PETR4.SA)
        └──────────────────────────────────────────► retorna ou null
 ```
-
-**Por que Brapi como primário:**
-- A Brapi conhece tickers B3 nativamente (`PETR4`, `MXRF11`, `BOVA11`) — sem necessidade de sufixo `.SA`
-- Resposta consistente para ações, FIIs, ETFs e BDRs listados na B3
-- Mesma fonte já usada para importação de preços e taxas macro (CDI/SELIC/IPCA)
-
-**Por que Yahoo como fallback:**
-- Cobre ativos internacionais (`AAPL`, `MSFT`) que a Brapi não indexa
-- Cobre casos excepcionais de tickers B3 obscuros que a Brapi eventualmente não retorna
-
-**Retrocompatibilidade:** `fetchYahooQuote` é mantido como alias de `fetchQuote` no `quote.provider.ts` — nenhum módulo existente precisou ser alterado além do `assets.controller.ts` (import atualizado).
 
 ---
 
@@ -235,6 +239,7 @@ Ticker (ex: PETR4)
 | Dividends | `/dividends` | Resumo de proventos por período |
 | Treasury | `/treasury` | Tesouro Direto — P&L, IR, IOF, resgate |
 | Fixed Income | `/fixed-income` | Renda Fixa — accrual, IR/IOF, isenção |
+| **IRPF** | **`/irpf`** | **Cálculo de IR por ano-calendário** |
 | Health | `/health` | Status da API |
 
 Todos os endpoints (exceto `/auth/*` e `/health`) exigem:
@@ -242,14 +247,54 @@ Todos os endpoints (exceto `/auth/*` e `/health`) exigem:
 Authorization: Bearer <token>
 ```
 
-### Endpoints críticos da Dashboard
+---
 
-| Endpoint | Método | Descrição |
-|---|---|---|
-| `/portfolio-snapshots` | GET | Snapshots do portfólio (params: `period`, `limit`, `orderBy`, `order`) |
-| `/allocation/calculate` | POST | Calcula alocação atual por classe |
-| `/performance/summary` | GET | Rentabilidade geral da carteira |
-| `/dividends/summary` | GET | Resumo total de proventos recebidos |
+## Módulo IRPF
+
+### Visão geral
+
+O módulo IRPF calcula, do lado do servidor, todas as obrigações fiscais de renda variável brasileira para um dado ano-calendário, com base nas transações registradas no sistema.
+
+### Endpoint
+
+```
+GET /irpf?year=2025
+```
+
+Retorna um objeto `IrpfSummary` com:
+
+| Campo | Descrição |
+|---|---|
+| `monthlyGains` | Ganho de capital mês × classe (swing + day trade) |
+| `incomeRows` | Rendimentos recebidos (dividendos isentos, FII, JCP tributável) |
+| `positions` | Posição em 31/12 para a ficha de Bens e Direitos |
+| `darfs` | DARFs a recolher por mês, com base de cálculo e vencimento |
+| `lossCarryForward` | Saldo de prejuízo acumulado não compensado no ano |
+
+### Regras implementadas
+
+| Classe | Isenção R$20k/mês | Alíquota Swing | Alíquota Day Trade |
+|---|---|---|---|
+| Ações (`DOMESTIC_STOCK`) | ✅ | 15% | 20% |
+| ETF nacional | ✅ | 15% | 20% |
+| FII | ❌ | 20% | 20% |
+| BDR | ❌ | 15% | 20% |
+
+- **Custo médio ponderado** calculado com todo o histórico de BUYs (não só do ano)
+- **Day trade detectado automaticamente**: mesmo `assetId` com BUY e SELL na mesma data
+- **Compensação de prejuízos sequencial por classe**: saldo de Ações não compensa FIIs (e vice-versa)
+- **DARFs**: geradas por mês × grupo (Renda Variável / FIIs / Day Trade), com vencimento no último dia do mês seguinte
+- Renda Fixa e Tesouro Direto têm IR retido na fonte — **não aparecem no ganho de capital**
+
+### Página frontend `/irpf`
+
+- Seletor de ano-calendário (últimos 6 anos, padrão = ano anterior)
+- **4 KPIs**: IR total devido, IR retido na fonte, rendimentos isentos, saldo de prejuízo acumulado
+- **Seção Ganho de Capital**: tabela mês × classe com receita de venda, custo, lucro/prejuízo, compensado, base de cálculo, alíquota e IR
+- **Seção DARFs**: competência, grupo, base, alíquota, valor a recolher e vencimento
+- **Seção Rendimentos**: dividendos isentos, FII_INCOME isento, JCP tributável com IR retido
+- **Seção Bens e Direitos**: posição atual com custo médio × quantidade = valor a declarar
+- Disclaimer destacando que Renda Fixa e Tesouro têm IR retido na fonte
 
 ---
 
@@ -284,8 +329,6 @@ docker compose exec api node -e "const { runFixedIncomeAccrual } = require('./di
 
 ### Gerar snapshots DAILY retroativos (últimos 90 dias)
 
-Caso o gráfico de evolução da dashboard apareça vazio, é necessário popular os snapshots DAILY históricos:
-
 ```powershell
 $headers = @{ Authorization = "Bearer SEU_TOKEN_AQUI" }
 
@@ -294,7 +337,7 @@ for ($i = 90; $i -ge 0; $i--) {
     $date = $today.AddDays(-$i).ToString("yyyy-MM-dd")
     try {
         Invoke-RestMethod -Method Post `
-          -Uri "http://localhost:3000/portfolio-snapshots/generate" `
+          -Uri "http://localhost:3001/portfolio-snapshots/generate" `
           -Headers $headers `
           -ContentType "application/json" `
           -Body ('{"referenceDate":"' + $date + '","period":"DAILY"}')
@@ -306,7 +349,7 @@ for ($i = 90; $i -ge 0; $i--) {
 }
 ```
 
-> ℹ️ Datas sem preço de mercado disponível (fins de semana / feriados) retornarão `SKIP` — comportamento esperado.
+> ℹ️ Datas sem preço disponível (fins de semana / feriados) retornarão `SKIP` — comportamento esperado.
 
 ---
 
@@ -315,16 +358,9 @@ for ($i = 90; $i -ge 0; $i--) {
 ### Comandos essenciais
 
 ```bash
-# Gerar nova migração após alterar schema.prisma
 npx prisma migrate dev --name descricao-da-mudanca
-
-# Aplicar migrações (produção / Docker)
 npx prisma migrate deploy
-
-# Abrir Prisma Studio (interface visual)
 npx prisma studio
-
-# Regenerar o Prisma Client
 npx prisma generate
 ```
 
@@ -332,7 +368,7 @@ npx prisma generate
 
 | Model | Descrição |
 |---|---|
-| `User` | Usuário do sistema (criado via seed) |
+| `User` | Usuário do sistema |
 | `AssetClass` | Classificação macro dos ativos |
 | `Asset` | Ativo individual — ticker, nome, classe |
 | `Transaction` | Compras, vendas e movimentos |
@@ -353,7 +389,7 @@ npx prisma generate
 |---|---|
 | Next.js | 15 — App Router |
 | Tailwind CSS | v4 |
-| React Query | `@tanstack/react-query` — cache e refetch automático |
+| React Query | `@tanstack/react-query` |
 | Recharts | Gráficos (AreaChart, PieChart) |
 | React Hook Form | Validação de formulários |
 | Zod | Schema de validação |
@@ -363,13 +399,10 @@ npx prisma generate
 
 ### Design System
 
-O frontend usa um design system próprio definido em `web/app/globals.css`:
-
 - **Paleta**: dark moderno inspirado em Linear/Vercel — superfícies Zinc com hierarquia clara
 - **Primário**: Azul-índigo (`#6366f1` / indigo-500)
 - **Tipografia**: Geist (display e body)
 - **Tokens CSS**: superfícies, texto, semânticas (success/warning/error), espaçamentos, raios e sombras
-- **Utilitários financeiros**: `.positive`, `.negative`, `.neutral`, `.tabular-nums`
 
 > ⚠️ Tokens `--color-surface-3`, `--color-primary-active` e `--color-error-muted` estão referenciados no código mas ainda não definidos em `globals.css`. Pendente de correção.
 
@@ -377,134 +410,84 @@ O frontend usa um design system próprio definido em `web/app/globals.css`:
 
 | Hook | Arquivo | Endpoints chamados |
 |---|---|---|
-| `useSnapshots(limit)` | `useDashboard.ts` | `GET /portfolio-snapshots` |
-| `useAllocation()` | `useDashboard.ts` | `POST /allocation/calculate` |
-| `usePerformance()` | `useDashboard.ts` | `GET /performance/summary` |
-| `useDividends()` | `useDashboard.ts` | `GET /dividends/summary` |
-| `usePortfolioItems()` | `usePortfolio.ts` | `GET /portfolio-items` |
-| `useSnapshots(period)` | `usePortfolio.ts` | `GET /portfolio-snapshots` |
-| `useAllocation()` | `usePortfolio.ts` | `POST /allocation/calculate` |
-| `usePerformance()` | `usePortfolio.ts` | `GET /performance/summary` |
-
-> ⚠️ Os hooks `useAllocation` e `usePerformance` existem em **dois arquivos** (`useDashboard.ts` e `usePortfolio.ts`). Eles usam `queryKey`s diferentes (`allocation` vs. `portfolio-allocation`) para evitar colisão de cache no React Query.
+| `useSnapshots` | `useDashboard.ts` | `GET /portfolio-snapshots` |
+| `useAllocation` | `useDashboard.ts` | `POST /allocation/calculate` |
+| `usePerformance` | `useDashboard.ts` | `GET /performance/summary` |
+| `useDividends` | `useDashboard.ts` | `GET /dividends/summary` |
+| `usePortfolioItems` | `usePortfolio.ts` | `GET /portfolio-items` |
+| `useAllocation` | `usePortfolio.ts` | `POST /allocation/calculate` |
+| `usePerformance` | `usePortfolio.ts` | `GET /performance/summary` |
+| `useTreasury` | `useTreasury.ts` | `GET /treasury` |
+| `useFixedIncome` | `useFixedIncome.ts` | `GET /fixed-income` |
+| **`useIrpf(year)`** | **`useIrpf.ts`** | **`GET /irpf?year=YYYY`** |
 
 ### Rotas
 
 | Rota | Status | Descrição |
 |---|---|---|
-| `/login` | ✅ Implementado | Tela de login com validação |
-| `/` | ✅ Implementado | Dashboard — KPIs, gráfico de evolução e gráfico de alocação |
+| `/login` | ✅ Implementado | Tela de login |
+| `/` | ✅ Implementado | Dashboard — KPIs, evolução patrimonial, alocação |
+| `/transactions` | ✅ Implementado | Histórico de transações com gráfico de movimentações |
+| `/irpf` | ✅ Implementado | IRPF — ganho de capital, DARFs, rendimentos, bens e direitos |
 | `/portfolio` | 🔲 Planejado | Posições, P&L, preço médio por ativo |
 | `/treasury` | 🔲 Planejado | Tesouro Direto — títulos, P&L líquido |
 | `/fixed-income` | 🔲 Planejado | Renda Fixa — accrual, isenção, status de vencimento |
-| `/transactions` | 🔲 Planejado | Histórico de transações |
-| `/allocation` | 🔲 Planejado | Alocação por classe vs. meta (gráfico) |
+| `/allocation` | 🔲 Planejado | Alocação por classe vs. meta |
+| `/analysis` | 🔲 Planejado | Análise inteligente da carteira (motor de regras + IA) |
 
 ---
 
 ## Problemas Resolvidos
 
-Registro dos principais problemas encontrados e solucionados durante o desenvolvimento.
-
 ### Login sem usuário no banco
 
-**Sintoma:** Ao tentar logar, a API retornava erro como se não existissem credenciais cadastradas.
-
-**Causa:** O `seed.ts` depende da variável `INITIAL_ADMIN_PASSWORD` para criar o usuário admin. Essa variável não estava sendo passada para dentro do container porque o `docker-compose.yml` usava `APP_USERNAME`/`APP_PASSWORD` (nomenclatura antiga) em vez de `INITIAL_ADMIN_USERNAME`/`INITIAL_ADMIN_PASSWORD`.
-
-**Solução:**
-1. Atualizar o `docker-compose.yml` para usar as variáveis corretas
-2. Adicionar `INITIAL_ADMIN_USERNAME` e `INITIAL_ADMIN_PASSWORD` no `.env` local
-3. Recriar o container com `docker compose up -d --force-recreate api`
-4. Rodar o seed novamente
+**Causa:** `docker-compose.yml` usava `APP_USERNAME`/`APP_PASSWORD` (nomenclatura antiga) em vez de `INITIAL_ADMIN_USERNAME`/`INITIAL_ADMIN_PASSWORD`.
+**Solução:** Atualizar variáveis no `docker-compose.yml` e `.env`, recriar container e rodar seed.
 
 ### Migrations não aplicadas no container
 
-**Sintoma:** A API subia mas falhava ao iniciar porque as tabelas não existiam no banco.
-
-**Causa:** O `Dockerfile` não copiava a pasta `prisma/migrations` para o estágio `runner`, então `prisma migrate deploy` não encontrava as migrations em produção.
-
-**Solução:** Adicionar `COPY --from=builder /app/prisma ./prisma` no estágio `runner` do Dockerfile.
+**Causa:** `Dockerfile` não copiava `prisma/migrations` para o estágio `runner`.
+**Solução:** Adicionar `COPY --from=builder /app/prisma ./prisma` no estágio `runner`.
 
 ### Erro de CORS no login pelo browser
 
-**Sintoma:** O login funcionava via `Invoke-RestMethod` / `curl`, mas no browser aparecia o erro:
-```
-Access to XMLHttpRequest at 'http://localhost:3000/auth/login' from origin 'http://localhost:3001'
-has been blocked by CORS policy: The 'Access-Control-Allow-Origin' header has a value
-'http://web:3001' that is not equal to the supplied origin.
-```
-
-**Causa:** O `CORS_ORIGIN` estava configurado como `http://web:3001` (endereço interno da rede Docker). O browser envia `Origin: http://localhost:3001`, que é diferente do valor esperado pela API.
-
-**Solução:** Alterar `CORS_ORIGIN` no `.env` para `http://localhost:3001` (a origem que o browser realmente envia) e recriar o container da API.
-
-> ℹ️ `http://web:3001` é válido para comunicação container-a-container (SSR do Next.js). Para requisições do browser, use `http://localhost:3001`.
+**Causa:** `CORS_ORIGIN=http://web:3001` (endereço interno Docker). O browser envia `Origin: http://localhost:3001`.
+**Solução:** Alterar `CORS_ORIGIN` para `http://localhost:3001` no `.env`.
 
 ### baseURL do Axios apontando para porta errada
 
-**Sintoma:** Todos os endpoints da dashboard (allocation, performance, dividends, snapshots) retornavam erro. As requisições chegavam ao próprio Next.js em vez da API NestJS.
-
-**Causa:** O valor default de `API_URL` em `web/lib/api.ts` estava como `http://localhost:3000` — a porta do Next.js. A API NestJS fica na porta `3001` localmente. Sem a variável `NEXT_PUBLIC_API_URL` definida no `.env`, o Axios apontava para o lugar errado.
-
-**Solução:** Corrigir o fallback em `api.ts` e o `.env.example`:
-```ts
-// antes
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'
-// depois
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
-```
+**Causa:** Fallback de `API_URL` em `web/lib/api.ts` estava como `http://localhost:3000` (porta do Next.js).
+**Solução:** Corrigir fallback para `http://localhost:3001`.
 
 ### queryKeys conflitantes entre useDashboard e usePortfolio
 
-**Sintoma:** Navegar entre a dashboard e a página de portfólio causava dados incorretos sendo exibidos (cache cruzado entre hooks).
+**Causa:** Hooks duplicados usavam as mesmas `queryKey`s, causando colisão de cache no React Query.
+**Solução:** Prefixar queryKeys de `usePortfolio.ts` com `portfolio-` (`portfolio-allocation`, `portfolio-performance`).
 
-**Causa:** `useAllocation()` e `usePerformance()` em `usePortfolio.ts` usavam as mesmas `queryKey`s (`['allocation']`, `['performance']`) que os hooks equivalentes em `useDashboard.ts`. Além disso, `useAllocation` em `usePortfolio.ts` chamava `GET /allocation` (inexistente) em vez de `POST /allocation/calculate`, e `usePerformance` chamava `GET /performance` em vez de `GET /performance/summary`.
+### Gráficos da dashboard em empty state
+
+**Causa:** Snapshots DAILY gerados com datas de 2024, fora do intervalo dos últimos 90 dias.
+**Solução:** Executar script PowerShell de geração retroativa (ver seção *Jobs Automáticos*).
+
+### Cotações exigindo sufixo `.SA`
+
+**Causa:** Yahoo Finance exige `.SA` para tickers B3, tornando o fluxo inconsistente.
+**Solução:** Criação de `quote.provider.ts` com estratégia Brapi primário → Yahoo fallback.
+
+### SyntaxError no SWC — mistura de `||` com `??`
+
+**Causa:** SWC rejeita expressões que misturam `||` e `??` sem parênteses explícitos.
+**Solução:** Extrair a subexpressão com `??` para variável separada em `NewTransactionDrawer.tsx`.
+
+### TypeScript errors no irpf.service.ts (build Docker)
+
+**Causa:** 3 erros de tipo:
+1. `assetId: { not: null }` — Prisma não aceita `null` no filtro `not`
+2. `ev.asset` inferido como inexistente por guard `if (!ev.asset)` desnecessário — `assetId` é não-nulo no schema
 
 **Solução:**
-- `useAllocation` em `usePortfolio.ts`: endpoint `GET /allocation` → `POST /allocation/calculate`; queryKey `['allocation']` → `['portfolio-allocation']`
-- `usePerformance` em `usePortfolio.ts`: endpoint `GET /performance` → `GET /performance/summary`; queryKey `['performance']` → `['portfolio-performance']`
-
-### Gráficos da dashboard em empty state (snapshots DAILY fora do intervalo)
-
-**Sintoma:** O gráfico de evolução do patrimônio (90 dias) aparecia vazio mesmo com dados no banco.
-
-**Causa:** Os snapshots `DAILY` existentes foram gerados pelo seed com dados históricos de 2024. O `useSnapshots(90)` busca os últimos 90 dias a partir de hoje, e nenhum snapshot caia nesse intervalo.
-
-**Solução:** Executar o script PowerShell de geração retroativa (ver seção *Jobs Automáticos → Gerar snapshots DAILY retroativos*) para popular os últimos 90 dias com dados reais da carteira atual.
-
-### Cotações exigindo sufixo `.SA` desnecessariamente
-
-**Sintoma:** Ao cadastrar um ativo B3 (ex: `PETR4`), o sistema buscava `PETR4.SA` no Yahoo Finance — um sufixo que não existe na realidade e confundia o fluxo de cadastro.
-
-**Causa:** O `yahoo.client.ts` era a única fonte de cotações e o Yahoo Finance exige o sufixo `.SA` para tickers da B3. Isso tornava o ticker exibido ao usuário inconsistente com o ticker real da bolsa.
-
-**Solução:** Criação de `src/providers/yahoo/quote.provider.ts` com estratégia em dois estágios: **Brapi como primário** (conhece tickers B3 nativamente, sem `.SA`) e **Yahoo Finance como fallback** (para ativos internacionais e casos excepcionais). O Yahoo ainda tenta `.SA` internamente como segunda tentativa, mas isso é transparente para o usuário.
-
-### SyntaxError no SWC — mistura de `||` com `??` sem parênteses
-
-**Sintoma:** Build do Docker falhava com:
-```
-Error: Nullish coalescing operator(??) requires parens when mixing with logical operators
-./components/transactions/NewTransactionDrawer.tsx
-```
-
-**Causa:** O SWC (compilador do Next.js 15) rejeita expressões que misturam `||` e `??` na mesma linha sem parênteses explícitos — regra de precedência de operadores herdada da especificação ECMAScript.
-
-```ts
-// ❌ inválido para o SWC
-const resolvedClassName = inferredClassName ||
-  (assetClasses.data ?? []).find(...)?.name ?? ''
-```
-
-**Solução:** Extrair a subexpressão com `??` para uma variável separada, eliminando a mistura:
-```ts
-// ✅ correto
-const fallbackClassName = (assetClasses.data ?? []).find(
-  (c: AssetClass) => c.id === fallbackClassId,
-)?.name ?? ''
-const resolvedClassName = inferredClassName || fallbackClassName
-```
+- Trocar `{ not: null }` por `{ not: undefined }`
+- Remover guard `if (!ev.asset)` e reescrever lógica de `incomeMap` com verificação de `existing` explícita
 
 ---
 
@@ -537,6 +520,17 @@ const resolvedClassName = inferredClassName || fallbackClassName
 | IPCA / IGPM | `principal × (1 + ipca + purchaseRate)^(dias/365)` |
 | PREFIXADO | `principal × (1 + purchaseRate)^(dias/365)` |
 
+### IRPF — Renda Variável (ativos brasileiros)
+
+| Classe | Isenção R$20k/mês | Swing Trade | Day Trade |
+|---|---|---|---|
+| Ações | ✅ | 15% | 20% |
+| ETF nacional | ✅ | 15% | 20% |
+| FII | ❌ | 20% | 20% |
+| BDR | ❌ | 15% | 20% |
+| Dividendos / FII_INCOME | — | Isento | — |
+| JCP | — | 15% retido na fonte | — |
+
 ---
 
 ## Roadmap
@@ -546,47 +540,46 @@ const resolvedClassName = inferredClassName || fallbackClassName
 - [x] CRUD completo de ativos, classes, transações, proventos e contas
 - [x] Importação de preços via BRAPI e Yahoo Finance
 - [x] Snapshots DAILY / WEEKLY / MONTHLY com geração retroativa
-- [x] Cron de importação de preços B3 + Yahoo Finance (5x/dia)
-- [x] Cron de importação de proventos semanal (Yahoo Finance)
+- [x] Crons automáticos (preços, proventos, snapshots, accrual, tesouro)
 - [x] Endpoints de alocação, performance e dividendos
-- [x] Módulo Tesouro Direto — cadastro, P&L (WAVG), IR/IOF, cron radaropcoes, resgate parcial/total
-- [x] Módulo Renda Fixa Privada — accrual por indexador, IR/IOF, isenção automática, resgate com P&L
-- [x] Cron de accrual de Renda Fixa (diário, taxas reais via BRAPI)
+- [x] Módulo Tesouro Direto — P&L (WAVG), IR/IOF, cron radaropcoes, resgate
+- [x] Módulo Renda Fixa Privada — accrual por indexador, IR/IOF, isenção, resgate
 - [x] Autenticação JWT com usuário criado via seed
-- [x] **`quote.provider.ts`** — estratégia Brapi primário / Yahoo Finance fallback (sem `.SA` obrigatório)
+- [x] `quote.provider.ts` — estratégia Brapi primário / Yahoo Finance fallback
+- [x] **Módulo IRPF** — `GET /irpf?year=YYYY` com ganho de capital, compensação de prejuízos, day trade automático, rendimentos, bens e DARFs
 
 ### ✅ Concluído — Frontend
 
 - [x] Estrutura Next.js 15 (App Router) com Tailwind CSS v4
 - [x] Design system próprio — tokens CSS, paleta dark, tipografia Geist
-- [x] Tela de login com validação (zod + react-hook-form)
-- [x] Layout do dashboard com sidebar responsiva (desktop + drawer mobile)
+- [x] Tela de login com validação
+- [x] Layout do dashboard com sidebar responsiva
 - [x] Cliente Axios com interceptors JWT e redirect em 401
 - [x] Middleware Next.js para proteção de rotas
-- [x] **Dashboard — página principal** com KPIs reais, gráfico de evolução do patrimônio (90 dias) e gráfico de alocação por classe, skeleton loaders e estados de erro/empty
-- [x] Hooks de dados com React Query (`useDashboard`, `usePortfolio`, `useTreasury`, `useFixedIncome`)
-- [x] **`NewTransactionDrawer`** — wizard 4 passos (tipo → ativo → detalhes → confirmar) com busca via Brapi/Yahoo, inferência de classe, cadastro automático de novo ativo
-- [x] **Correção da baseURL do Axios** — fallback de `3000` → `3001` (`web/lib/api.ts`)
-- [x] **Correção dos endpoints em `usePortfolio.ts`** — `/allocation` → `POST /allocation/calculate`; `/performance` → `GET /performance/summary`
-- [x] **Correção de queryKeys** em `usePortfolio.ts` para evitar colisão de cache com `useDashboard.ts`
-- [x] **Fix SWC build** — extração de variável em `NewTransactionDrawer.tsx` para resolver erro de precedência `||` vs `??`
+- [x] **Dashboard** — KPIs reais, gráfico de evolução (90 dias), gráfico de alocação
+- [x] `NewTransactionDrawer` — wizard 4 passos com busca Brapi/Yahoo e cadastro automático de ativo
+- [x] **Página de Transações** — histórico mensal com gráfico de movimentações
+- [x] **Página IRPF** — ganho de capital, DARFs, rendimentos, bens e direitos, seletor de ano
+- [x] `useIrpf(year)` — hook React Query para o módulo IRPF
+- [x] `web/lib/types/irpf.ts` — tipos TypeScript do módulo IRPF
 
-### 🔴 Alta Prioridade — Em andamento
+### 🔴 Alta Prioridade
 
 - [ ] **Renomear projeto de SIG para SGFP** — ver checklist abaixo
-- [ ] **Corrigir tokens CSS inconsistentes** — `--color-surface-3`, `--color-primary-active`, `--color-error-muted` referenciados no código mas não definidos em `globals.css`
+- [ ] **Corrigir tokens CSS inconsistentes** — `--color-surface-3`, `--color-primary-active`, `--color-error-muted`
 - [ ] **Tesouro Direto — import histórico via CSV** (Tesouro Transparente)
+- [ ] **Adicionar link IRPF no menu lateral** — sidebar ainda não tem o item
 
 ### 🟡 Média Prioridade
 
 - [ ] Página `/portfolio` — posições, P&L, preço médio, % da carteira
 - [ ] Página `/treasury` — tabela de títulos com P&L líquido
 - [ ] Página `/fixed-income` — accrual, isenção, status de vencimento
-- [ ] Página `/transactions` — histórico com filtros
 - [ ] Página `/allocation` — gráfico pizza interativo
+- [ ] **Página `/analysis` — Análise inteligente da carteira** (ver seção abaixo)
 - [ ] IRR / XIRR — retorno real considerando timing de aportes
 - [ ] Benchmark — comparar carteira vs. CDI, IBOV e IPCA
-- [ ] Dark/light mode toggle no frontend
+- [ ] Dark/light mode toggle
 - [ ] Testes automatizados nos services críticos
 
 ### 🟢 Baixa Prioridade
@@ -601,47 +594,74 @@ const resolvedClassName = inferredClassName || fallbackClassName
 
 ---
 
+## Módulo de Análise (Planejado)
+
+Abordagem híbrida em duas camadas:
+
+### Camada 1 — Motor de Regras (instantâneo, sem IA)
+
+```
+GET /analysis/portfolio  →  sinais automáticos por ativo
+```
+
+Cada ativo recebe um **score** e lista de **sinais** baseados nos dados internos:
+
+| Sinal | Fonte |
+|---|---|
+| Posição vs. % ideal (rebalanceamento) | `allocation` |
+| Rentabilidade vs. custo médio | `portfolio-items` |
+| Classe subponderada / sobreponderada | `allocation` |
+| Sem proventos nos últimos 12 meses | `income-events` |
+| Lucro realizável acima de X% | `portfolio-items` |
+| Tendência de preço vs. média histórica | `price-history` |
+
+### Camada 2 — Análise com IA + Web Search (sob demanda)
+
+```
+POST /analysis/ai  →  { ticker }  →  análise em linguagem natural
+```
+
+**Fluxo:**
+1. Monta contexto interno (posição, custo médio, rentabilidade, proventos)
+2. Busca na web via **Serper API** — relatórios gerenciais (RI), notícias e resultados trimestrais
+3. Envia contexto + web search para **Google Gemini 2.0 Flash** (gratuito)
+4. Retorna análise em português com: tese, pontos positivos, riscos e recomendação
+5. Salva resultado em cache no PostgreSQL (`ai_analysis_cache`) com TTL de 24h
+
+**Variáveis de ambiente necessárias:** `GEMINI_API_KEY` e `SERPER_API_KEY` (já documentadas acima)
+
+---
+
 ## Checklist de Renomeação — SIG → SGFP
 
-Arquivos e trechos que ainda precisam ser atualizados para refletir o novo nome **SGFP — Sistema de Gestão de Finanças Pessoais**:
-
 ### Identidade visual (frontend)
-- [ ] `web/app/(auth)/login/page.tsx` — texto "Sistema de Investimentos" e sigla "SIG"
-- [ ] `web/app/(dashboard)/layout.tsx` — logo e texto "SIG / Investimentos" na sidebar e header mobile
-- [ ] `web/app/layout.tsx` — metadata `title` e `description` da aplicação
-- [ ] `web/app/globals.css` — comentário do design system ainda referencia nome antigo
-- [ ] `web/middleware.ts` — cookie nomeado `sig_token` → `sgfp_token`
+- [ ] `web/app/(auth)/login/page.tsx` — texto "SIG"
+- [ ] `web/app/(dashboard)/layout.tsx` — logo e texto na sidebar
+- [ ] `web/app/layout.tsx` — metadata `title` e `description`
+- [ ] `web/middleware.ts` — cookie `sig_token` → `sgfp_token`
 - [ ] `web/lib/auth.ts` — constante `TOKEN_KEY = 'sig_token'` → `'sgfp_token'`
 
 ### Docker e infraestrutura
 - [ ] `docker-compose.yml` — `name: sig` → `name: sgfp`
-- [ ] `docker-compose.yml` — `DOCKER_NETWORK_NAME` → `sgfp_network`
 - [ ] `.env` / `.env.example` — variáveis e comentários com "SIG"
 
-### API
+### Pacotes
 - [ ] `package.json` — `"name": "sig-api"` → `"sgfp-api"`
 - [ ] `web/package.json` — `"name": "sig-web"` → `"sgfp-web"`
 
 ### Banco de dados
-- [ ] Variável `POSTGRES_DB` — `sig_db` → `sgfp_db` (requer recriar volume ou migração manual)
-
-> ⚠️ Renomear o banco (`POSTGRES_DB`) apaga os dados do volume atual se não for feita uma migração/dump antes. Faça backup com `docker compose exec db pg_dump -U $APP_DB_USER $POSTGRES_DB > backup.sql` antes de alterar.
+- [ ] `POSTGRES_DB`: `sig_db` → `sgfp_db` (requer backup antes: `docker compose exec db pg_dump -U $APP_DB_USER $POSTGRES_DB > backup.sql`)
 
 ---
 
 ## Contribuindo
 
 ```bash
-# Criar branch de feature
 git checkout -b feat/nome-da-feature
-
-# Commitar seguindo Conventional Commits
 git commit -m "feat(module): descrição da mudança"
-
-# Push e abrir PR para main
 git push origin feat/nome-da-feature
 ```
 
 ---
 
-*SGFP v0.3.1 — uso pessoal*
+*SGFP v0.4.0 — uso pessoal*
