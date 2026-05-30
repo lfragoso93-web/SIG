@@ -7,13 +7,19 @@ import {
 import {
   ArrowLeftRight, ChevronLeft, ChevronRight,
   TrendingUp, TrendingDown, Minus, AlertCircle, RefreshCw,
+  Search, Filter, Pencil, Trash2, X, ChevronLeftIcon, ChevronRightIcon,
 } from 'lucide-react'
 import { format, parseISO, startOfMonth, endOfMonth, isWithinInterval, subMonths } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { fmt } from '@/lib/utils'
-import { useTransactions, type Transaction } from '@/lib/hooks/useTransactions'
+import {
+  useTransactions,
+  useDeleteTransaction,
+  type Transaction,
+} from '@/lib/hooks/useTransactions'
+import { EditTransactionDrawer } from '@/components/transactions/EditTransactionDrawer'
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+const PAGE_SIZE = 20
 
 function toNum(v: string | number | undefined): number {
   if (v == null) return 0
@@ -24,13 +30,9 @@ function txValue(tx: Transaction): number {
   return toNum(tx.grossAmount)
 }
 
-// ── Skeleton ─────────────────────────────────────────────────────────────────
-
 function Skeleton({ className = '' }: { className?: string }) {
   return <div className={`bg-[var(--color-surface-offset)] rounded animate-pulse ${className}`} />
 }
-
-// ── Tooltip do gráfico ───────────────────────────────────────────────────────
 
 function BarTooltip({ active, payload, label }: {
   active?: boolean
@@ -54,8 +56,6 @@ function BarTooltip({ active, payload, label }: {
   )
 }
 
-// ── Badge BUY / SELL ─────────────────────────────────────────────────────────
-
 function TxBadge({ type }: { type: string }) {
   return (
     <span className={`
@@ -69,24 +69,42 @@ function TxBadge({ type }: { type: string }) {
   )
 }
 
-// ── Página ───────────────────────────────────────────────────────────────────
-
 export default function TransactionsPage() {
   const { data, isLoading, isError, refetch } = useTransactions()
-  const [currentMonth, setCurrentMonth] = useState(() => startOfMonth(new Date()))
+  const deleteTx = useDeleteTransaction()
 
-  // Gráfico: últimos 12 meses
+  const [currentMonth, setCurrentMonth] = useState(() => startOfMonth(new Date()))
+  const [editTarget,   setEditTarget]   = useState<Transaction | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [page,         setPage]         = useState(1)
+
+  // Filtros
+  const [search,      setSearch]      = useState('')
+  const [filterType,  setFilterType]  = useState<'ALL' | 'BUY' | 'SELL'>('ALL')
+  const [filterClass, setFilterClass] = useState('ALL')
+
+  // Classes disponíveis para o filtro
+  const availableClasses = useMemo(() => {
+    if (!data) return []
+    const set = new Set<string>()
+    data.forEach((tx) => {
+      const name = tx.asset?.assetClass?.name
+      if (name) set.add(name)
+    })
+    return Array.from(set).sort()
+  }, [data])
+
+  // Gráfico 12 meses (sem filtros)
   const chartData = useMemo(() => {
     if (!data) return []
     return Array.from({ length: 12 }, (_, i) => {
       const monthStart = startOfMonth(subMonths(new Date(), 11 - i))
       const monthEnd   = endOfMonth(monthStart)
       const label      = format(monthStart, 'MMM/yy', { locale: ptBR })
-      const inMonth    = data.filter((tx) => {
-        const d = parseISO(tx.tradeDate)
-        return isWithinInterval(d, { start: monthStart, end: monthEnd })
-      })
-      const buys  = inMonth.filter((t) => t.type === 'BUY').reduce((s, t) => s + txValue(t), 0)
+      const inMonth    = data.filter((tx) =>
+        isWithinInterval(parseISO(tx.tradeDate), { start: monthStart, end: monthEnd })
+      )
+      const buys  = inMonth.filter((t) => t.type === 'BUY').reduce((s, t)  => s + txValue(t), 0)
       const sells = inMonth.filter((t) => t.type === 'SELL').reduce((s, t) => s + txValue(t), 0)
       return { label, buys, sells }
     })
@@ -108,20 +126,44 @@ export default function TransactionsPage() {
   const totalSell = monthTxs.filter((t) => t.type === 'SELL').reduce((s, t) => s + txValue(t), 0)
   const netMonth  = totalBuy - totalSell
 
-  // Agrupar por classe de ativo
-  const grouped = useMemo(() => {
-    const map = new Map<string, { className: string; transactions: Transaction[] }>()
-    monthTxs.forEach((tx) => {
-      const key  = tx.asset?.assetClass?.name ?? 'Sem classe'
-      const item = map.get(key) ?? { className: key, transactions: [] }
-      item.transactions.push(tx)
-      map.set(key, item)
-    })
-    return Array.from(map.values()).sort((a, b) => a.className.localeCompare(b.className))
-  }, [monthTxs])
+  // Filtros aplicados sobre o mês selecionado
+  const filtered = useMemo(() => {
+    let list = monthTxs
+    if (filterType !== 'ALL')    list = list.filter((t) => t.type === filterType)
+    if (filterClass !== 'ALL')   list = list.filter((t) => t.asset?.assetClass?.name === filterClass)
+    if (search.trim().length > 0) {
+      const q = search.trim().toUpperCase()
+      list = list.filter((t) =>
+        t.asset?.ticker?.toUpperCase().includes(q) ||
+        t.asset?.name?.toUpperCase().includes(q)
+      )
+    }
+    return list.slice().sort((a, b) =>
+      parseISO(b.tradeDate).getTime() - parseISO(a.tradeDate).getTime()
+    )
+  }, [monthTxs, filterType, filterClass, search])
+
+  // Paginação
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const safePage   = Math.min(page, totalPages)
+  const paginated  = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+
+  const resetFilters = () => {
+    setSearch(''); setFilterType('ALL'); setFilterClass('ALL'); setPage(1)
+  }
+  const hasActiveFilters = search || filterType !== 'ALL' || filterClass !== 'ALL'
 
   const monthLabel = format(currentMonth, 'MMMM yyyy', { locale: ptBR })
-  const monthLabelCapitalized = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1)
+  const monthLabelCap = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1)
+
+  const handleDelete = async (id: string) => {
+    setDeleteTarget(id)
+    try {
+      await deleteTx.mutateAsync(id)
+    } finally {
+      setDeleteTarget(null)
+    }
+  }
 
   return (
     <div className="p-6 lg:p-8">
@@ -174,18 +216,18 @@ export default function TransactionsPage() {
         )}
       </div>
 
-      {/* KPIs + Navegação de mês */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+      {/* Navegação de mês + KPIs */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setCurrentMonth((m) => startOfMonth(subMonths(m, 1)))}
+            onClick={() => { setCurrentMonth((m) => startOfMonth(subMonths(m, 1))); setPage(1) }}
             className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[var(--color-surface-offset)] transition-colors"
           >
             <ChevronLeft size={16} />
           </button>
-          <span className="text-sm font-semibold min-w-[140px] text-center">{monthLabelCapitalized}</span>
+          <span className="text-sm font-semibold min-w-[140px] text-center">{monthLabelCap}</span>
           <button
-            onClick={() => setCurrentMonth((m) => startOfMonth(subMonths(m, -1)))}
+            onClick={() => { setCurrentMonth((m) => startOfMonth(subMonths(m, -1))); setPage(1) }}
             disabled={currentMonth >= startOfMonth(new Date())}
             className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[var(--color-surface-offset)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           >
@@ -213,15 +255,77 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      {/* Lista agrupada por classe */}
-      {isLoading && (
-        <div className="space-y-4">
-          {[1, 2].map((i) => (
-            <div key={i} className="bg-[var(--color-surface-2)] border border-[var(--color-border-subtle)] rounded-xl p-4 space-y-3">
-              <Skeleton className="h-4 w-32" />
-              {[1, 2, 3].map((j) => <Skeleton key={j} className="h-10 w-full" />)}
-            </div>
+      {/* Barra de filtros */}
+      <div className="flex flex-wrap items-center gap-2 mb-5">
+        {/* Busca */}
+        <div className="relative flex-1 min-w-[180px]">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-faint)] pointer-events-none" />
+          <input
+            value={search}
+            onChange={(e) => { setSearch(e.target.value.toUpperCase()); setPage(1) }}
+            placeholder="Buscar por ticker ou nome…"
+            className="w-full pl-8 pr-3 py-2 text-xs rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border-subtle)] text-[var(--color-text)] placeholder:text-[var(--color-text-faint)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-transparent"
+          />
+        </div>
+
+        {/* Tipo */}
+        <div className="flex items-center gap-1 bg-[var(--color-surface-2)] border border-[var(--color-border-subtle)] rounded-lg p-1">
+          {(['ALL', 'BUY', 'SELL'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => { setFilterType(t); setPage(1) }}
+              className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                filterType === t
+                  ? t === 'BUY' ? 'bg-emerald-500/15 text-emerald-400'
+                  : t === 'SELL' ? 'bg-red-500/15 text-red-400'
+                  : 'bg-[var(--color-surface-offset)] text-[var(--color-text)]'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+              }`}
+            >
+              {t === 'ALL' ? 'Todos' : t === 'BUY' ? 'Compras' : 'Vendas'}
+            </button>
           ))}
+        </div>
+
+        {/* Classe */}
+        {availableClasses.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            <Filter size={12} className="text-[var(--color-text-faint)]" />
+            <select
+              value={filterClass}
+              onChange={(e) => { setFilterClass(e.target.value); setPage(1) }}
+              className="text-xs rounded-lg px-2.5 py-2 bg-[var(--color-surface-2)] border border-[var(--color-border-subtle)] text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+            >
+              <option value="ALL">Todas as classes</option>
+              {availableClasses.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Limpar filtros */}
+        {hasActiveFilters && (
+          <button
+            onClick={resetFilters}
+            className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-error)] transition-colors"
+          >
+            <X size={12} /> Limpar
+          </button>
+        )}
+      </div>
+
+      {/* Resultado dos filtros */}
+      {hasActiveFilters && (
+        <p className="text-xs text-[var(--color-text-faint)] mb-3">
+          {filtered.length} transaç{filtered.length === 1 ? 'ão' : 'ões'} encontrada{filtered.length === 1 ? '' : 's'}
+        </p>
+      )}
+
+      {/* Estados de carregamento / erro / vazio */}
+      {isLoading && (
+        <div className="space-y-3">
+          {[1,2,3,4,5].map((i) => <Skeleton key={i} className="h-14 w-full" />)}
         </div>
       )}
 
@@ -238,71 +342,145 @@ export default function TransactionsPage() {
         </div>
       )}
 
-      {!isLoading && !isError && grouped.length === 0 && (
+      {!isLoading && !isError && filtered.length === 0 && (
         <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
           <div className="w-12 h-12 rounded-full bg-[var(--color-surface-offset)] flex items-center justify-center">
             <ArrowLeftRight size={20} className="text-[var(--color-text-faint)]" />
           </div>
-          <p className="text-sm font-medium text-[var(--color-text-muted)]">Nenhuma transação em {monthLabelCapitalized}</p>
-          <p className="text-xs text-[var(--color-text-faint)]">Use o botão + para registrar um lançamento</p>
+          <p className="text-sm font-medium text-[var(--color-text-muted)]">
+            {hasActiveFilters ? 'Nenhuma transação para os filtros selecionados.' : `Nenhuma transação em ${monthLabelCap}`}
+          </p>
+          {!hasActiveFilters && (
+            <p className="text-xs text-[var(--color-text-faint)]">Use o botão + para registrar um lançamento</p>
+          )}
         </div>
       )}
 
-      {!isLoading && !isError && grouped.length > 0 && (
-        <div className="space-y-4">
-          {grouped.map(({ className, transactions }) => {
-            const groupBuy  = transactions.filter((t) => t.type === 'BUY').reduce((s, t) => s + txValue(t), 0)
-            const groupSell = transactions.filter((t) => t.type === 'SELL').reduce((s, t) => s + txValue(t), 0)
-            return (
-              <div
-                key={className}
-                className="bg-[var(--color-surface-2)] border border-[var(--color-border-subtle)] rounded-xl overflow-hidden"
-              >
-                {/* Cabeçalho do grupo */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-subtle)]">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-                    {className}
-                  </span>
-                  <div className="flex gap-4 text-xs tabular-nums">
-                    {groupBuy > 0 && <span className="text-emerald-400">+{fmt.currency(groupBuy)}</span>}
-                    {groupSell > 0 && <span className="text-red-400">-{fmt.currency(groupSell)}</span>}
-                  </div>
-                </div>
+      {/* Tabela de transações */}
+      {!isLoading && !isError && paginated.length > 0 && (
+        <div className="bg-[var(--color-surface-2)] border border-[var(--color-border-subtle)] rounded-xl overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-[var(--color-border-subtle)]">
+                {['Tipo', 'Ativo', 'Classe', 'Data', 'Qtd × Preço', 'Total', 'Taxas', ''].map((h) => (
+                  <th
+                    key={h}
+                    className="px-4 py-3 text-left font-medium text-[var(--color-text-muted)] whitespace-nowrap"
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--color-border-subtle)]">
+              {paginated.map((tx) => (
+                <tr
+                  key={tx.id}
+                  className="hover:bg-[var(--color-surface-offset)] transition-colors group"
+                >
+                  <td className="px-4 py-3"><TxBadge type={tx.type} /></td>
+                  <td className="px-4 py-3">
+                    <p className="font-semibold">{tx.asset?.ticker ?? '—'}</p>
+                    <p className="text-[var(--color-text-faint)] truncate max-w-[140px]">{tx.asset?.name}</p>
+                  </td>
+                  <td className="px-4 py-3 text-[var(--color-text-muted)] whitespace-nowrap">
+                    {tx.asset?.assetClass?.name ?? '—'}
+                  </td>
+                  <td className="px-4 py-3 text-[var(--color-text-muted)] whitespace-nowrap">
+                    {fmt.date(tx.tradeDate)}
+                  </td>
+                  <td className="px-4 py-3 tabular-nums text-[var(--color-text-muted)] whitespace-nowrap">
+                    {fmt.number(toNum(tx.quantity), 0)} × {fmt.currency(toNum(tx.unitPrice))}
+                  </td>
+                  <td className={`px-4 py-3 tabular-nums font-semibold whitespace-nowrap ${
+                    tx.type === 'BUY' ? 'text-emerald-400' : 'text-red-400'
+                  }`}>
+                    {tx.type === 'BUY' ? '+' : '-'}{fmt.currency(txValue(tx))}
+                  </td>
+                  <td className="px-4 py-3 tabular-nums text-[var(--color-text-faint)] whitespace-nowrap">
+                    {toNum(tx.fees) > 0 ? fmt.currency(toNum(tx.fees)) : '—'}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => setEditTarget(tx)}
+                        title="Editar"
+                        className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-[var(--color-surface-3)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(tx.id)}
+                        disabled={deleteTarget === tx.id}
+                        title="Excluir"
+                        className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 transition-colors disabled:opacity-40"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-                {/* Linhas */}
-                <div className="divide-y divide-[var(--color-border-subtle)]">
-                  {transactions
-                    .slice()
-                    .sort((a, b) => parseISO(b.tradeDate).getTime() - parseISO(a.tradeDate).getTime())
-                    .map((tx) => (
-                      <div key={tx.id} className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--color-surface-offset)] transition-colors">
-                        <TxBadge type={tx.type} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium">{tx.asset?.ticker ?? '—'}</p>
-                          <p className="text-xs text-[var(--color-text-faint)] truncate">{tx.asset?.name}</p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <p className="text-xs text-[var(--color-text-muted)]">{fmt.date(tx.tradeDate)}</p>
-                          <p className="text-xs tabular-nums text-[var(--color-text-muted)]">
-                            {fmt.number(toNum(tx.quantity), 0)} × {fmt.currency(toNum(tx.unitPrice))}
-                          </p>
-                        </div>
-                        <div className="text-right flex-shrink-0 min-w-[80px]">
-                          <p className={`text-sm font-semibold tabular-nums ${
-                            tx.type === 'BUY' ? 'text-emerald-400' : 'text-red-400'
-                          }`}>
-                            {tx.type === 'BUY' ? '+' : '-'}{fmt.currency(txValue(tx))}
-                          </p>
-                        </div>
-                      </div>
-                    ))
-                  }
-                </div>
+          {/* Paginação */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--color-border-subtle)]">
+              <p className="text-xs text-[var(--color-text-faint)]">
+                {((safePage - 1) * PAGE_SIZE) + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} de {filtered.length}
+              </p>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={safePage === 1}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-[var(--color-surface-offset)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeftIcon size={14} />
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter((p) => p === 1 || p === totalPages || Math.abs(p - safePage) <= 1)
+                  .reduce<(number | '...')[]>((acc, p, idx, arr) => {
+                    if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...')
+                    acc.push(p)
+                    return acc
+                  }, [])
+                  .map((p, i) =>
+                    p === '...' ? (
+                      <span key={`ellipsis-${i}`} className="w-7 text-center text-xs text-[var(--color-text-faint)]">…</span>
+                    ) : (
+                      <button
+                        key={p}
+                        onClick={() => setPage(p as number)}
+                        className={`w-7 h-7 rounded-lg text-xs font-medium transition-colors ${
+                          safePage === p
+                            ? 'bg-[var(--color-primary)] text-white'
+                            : 'hover:bg-[var(--color-surface-offset)] text-[var(--color-text-muted)]'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={safePage === totalPages}
+                  className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-[var(--color-surface-offset)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRightIcon size={14} />
+                </button>
               </div>
-            )
-          })}
+            </div>
+          )}
         </div>
       )}
+
+      {/* Drawer de edição */}
+      <EditTransactionDrawer
+        transaction={editTarget}
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+      />
     </div>
   )
 }

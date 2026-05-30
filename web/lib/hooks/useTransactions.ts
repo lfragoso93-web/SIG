@@ -46,6 +46,16 @@ export interface CreateTransactionPayload {
   status?: string
 }
 
+export interface UpdateTransactionPayload {
+  type?: 'BUY' | 'SELL'
+  tradeDate?: string
+  quantity?: number
+  unitPrice?: number
+  grossAmount?: number
+  fees?: number
+  status?: string
+}
+
 export interface CreateAssetPayload {
   ticker: string
   name: string
@@ -108,7 +118,6 @@ export function useAssetByTicker(ticker: string) {
   })
 }
 
-/** Consulta a brapi.dev para obter nome, preço e tipo do ativo */
 export function useBrapiQuote(ticker: string, enabled = false) {
   return useQuery<BrapiQuote | null>({
     queryKey: ['brapi-quote', ticker],
@@ -159,6 +168,39 @@ export function useCreateTransaction() {
       qc.invalidateQueries({ queryKey: ['portfolio-allocation'] })
       qc.invalidateQueries({ queryKey: ['performance'] })
       qc.invalidateQueries({ queryKey: ['portfolio-performance'] })
+    },
+  })
+}
+
+export function useUpdateTransaction() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: UpdateTransactionPayload }) => {
+      const { data } = await api.put(`/transactions/${id}`, payload)
+      return data as Transaction
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transactions'] })
+      qc.invalidateQueries({ queryKey: ['portfolio-items'] })
+      qc.invalidateQueries({ queryKey: ['allocation'] })
+      qc.invalidateQueries({ queryKey: ['portfolio-allocation'] })
+      qc.invalidateQueries({ queryKey: ['performance'] })
+    },
+  })
+}
+
+export function useDeleteTransaction() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/transactions/${id}`)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transactions'] })
+      qc.invalidateQueries({ queryKey: ['portfolio-items'] })
+      qc.invalidateQueries({ queryKey: ['allocation'] })
+      qc.invalidateQueries({ queryKey: ['portfolio-allocation'] })
+      qc.invalidateQueries({ queryKey: ['performance'] })
     },
   })
 }
