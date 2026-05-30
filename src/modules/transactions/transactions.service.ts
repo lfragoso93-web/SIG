@@ -50,9 +50,7 @@ type UpdateTransactionInput = {
 
 const transactionInclude = {
   account: true,
-  asset: {
-    include: { assetClass: true },
-  },
+  asset: { include: { assetClass: true } },
 }
 
 const toDecimal = (value: DecimalInput): Prisma.Decimal | undefined => {
@@ -68,7 +66,6 @@ const toDecimalOrNull = (value: DecimalInput): Prisma.Decimal | null => {
 /**
  * Dispara a regeneração do snapshot WEEKLY da semana da transação
  * de forma assíncrona — não bloqueia a resposta da API.
- * Erros são logados mas não propagados.
  */
 function triggerSnapshotRegen(tradeDate: Date): void {
   generateSnapshot(tradeDate, 'WEEKLY')
@@ -78,41 +75,47 @@ function triggerSnapshotRegen(tradeDate: Date): void {
 
 class TransactionsService {
   async create(data: CreateTransactionInput) {
-    if (data.accountId) {
-      const account = await prisma.account.findUnique({ where: { id: data.accountId } })
-      if (!account) throw new Error('Conta não encontrada.')
-    }
+    // Todas as validações + criação em uma única transação atômica.
+    // Se qualquer etapa falhar, o banco reverte completamente (ACID).
+    const transaction = await prisma.$transaction(async (tx) => {
+      if (data.accountId) {
+        const account = await tx.account.findUnique({ where: { id: data.accountId } })
+        if (!account) throw new Error('Conta não encontrada.')
+      }
 
-    if (data.assetId) {
-      const asset = await prisma.asset.findUnique({ where: { id: data.assetId } })
-      if (!asset) throw new Error('Ativo não encontrado.')
-    }
+      if (data.assetId) {
+        const asset = await tx.asset.findUnique({ where: { id: data.assetId } })
+        if (!asset) throw new Error('Ativo não encontrado.')
+      }
 
-    const transaction = await prisma.transaction.create({
-      data: {
-        accountId:        data.accountId        ?? null,
-        assetId:          data.assetId          ?? null,
-        type:             data.type              as any,
-        status:           (data.status ?? 'POSTED') as any,
-        tradeDate:        data.tradeDate,
-        settlementDate:   data.settlementDate   ?? null,
-        quantity:         toDecimalOrNull(data.quantity),
-        unitPrice:        toDecimalOrNull(data.unitPrice),
-        grossAmount:      new Prisma.Decimal(data.grossAmount as string | number | Prisma.Decimal),
-        fees:             toDecimalOrNull(data.fees)  ?? new Prisma.Decimal(0),
-        taxes:            toDecimalOrNull(data.taxes) ?? new Prisma.Decimal(0),
-        netAmount:        toDecimalOrNull(data.netAmount),
-        currencyCode:     data.currencyCode     ?? 'BRL',
-        exchangeRate:     toDecimalOrNull(data.exchangeRate),
-        externalId:       data.externalId       ?? null,
-        brokerNoteNumber: data.brokerNoteNumber ?? null,
-        description:      data.description      ?? null,
-        importedFrom:     data.importedFrom     ?? null,
-        importedRowRef:   data.importedRowRef   ?? null,
-      },
-      include: transactionInclude,
+      return tx.transaction.create({
+        data: {
+          accountId:        data.accountId        ?? null,
+          assetId:          data.assetId          ?? null,
+          type:             data.type              as any,
+          status:           (data.status ?? 'POSTED') as any,
+          tradeDate:        data.tradeDate,
+          settlementDate:   data.settlementDate   ?? null,
+          quantity:         toDecimalOrNull(data.quantity),
+          unitPrice:        toDecimalOrNull(data.unitPrice),
+          grossAmount:      new Prisma.Decimal(data.grossAmount as string | number | Prisma.Decimal),
+          fees:             toDecimalOrNull(data.fees)  ?? new Prisma.Decimal(0),
+          taxes:            toDecimalOrNull(data.taxes) ?? new Prisma.Decimal(0),
+          netAmount:        toDecimalOrNull(data.netAmount),
+          currencyCode:     data.currencyCode     ?? 'BRL',
+          exchangeRate:     toDecimalOrNull(data.exchangeRate),
+          externalId:       data.externalId       ?? null,
+          brokerNoteNumber: data.brokerNoteNumber ?? null,
+          description:      data.description      ?? null,
+          importedFrom:     data.importedFrom     ?? null,
+          importedRowRef:   data.importedRowRef   ?? null,
+        },
+        include: transactionInclude,
+      })
     })
 
+    // Snapshot é disparado fora da $transaction — é um efeito colateral
+    // assíncrono que não deve impedir a resposta nem reverter a transação.
     triggerSnapshotRegen(data.tradeDate)
     return transaction
   }
@@ -137,45 +140,47 @@ class TransactionsService {
     const existing = await prisma.transaction.findUnique({ where: { id } })
     if (!existing) throw new Error('Transação não encontrada.')
 
-    if (data.accountId) {
-      const account = await prisma.account.findUnique({ where: { id: data.accountId } })
-      if (!account) throw new Error('Conta não encontrada.')
-    }
+    // Validação de FK + update em bloco atômico.
+    const transaction = await prisma.$transaction(async (tx) => {
+      if (data.accountId) {
+        const account = await tx.account.findUnique({ where: { id: data.accountId } })
+        if (!account) throw new Error('Conta não encontrada.')
+      }
 
-    if (data.assetId) {
-      const asset = await prisma.asset.findUnique({ where: { id: data.assetId } })
-      if (!asset) throw new Error('Ativo não encontrado.')
-    }
+      if (data.assetId) {
+        const asset = await tx.asset.findUnique({ where: { id: data.assetId } })
+        if (!asset) throw new Error('Ativo não encontrado.')
+      }
 
-    const transaction = await prisma.transaction.update({
-      where: { id },
-      data: {
-        accountId:        data.accountId        !== undefined ? data.accountId        : undefined,
-        assetId:          data.assetId          !== undefined ? data.assetId          : undefined,
-        type:             data.type             !== undefined ? (data.type as any)    : undefined,
-        status:           data.status           !== undefined ? (data.status as any)  : undefined,
-        tradeDate:        data.tradeDate        ?? undefined,
-        settlementDate:   data.settlementDate   !== undefined ? data.settlementDate   : undefined,
-        quantity:         data.quantity         !== undefined ? toDecimal(data.quantity)   : undefined,
-        unitPrice:        data.unitPrice        !== undefined ? toDecimal(data.unitPrice)  : undefined,
-        grossAmount:      data.grossAmount      !== undefined
-                            ? new Prisma.Decimal(data.grossAmount as string | number | Prisma.Decimal)
-                            : undefined,
-        fees:             data.fees             !== undefined ? toDecimal(data.fees)        : undefined,
-        taxes:            data.taxes            !== undefined ? toDecimal(data.taxes)       : undefined,
-        netAmount:        data.netAmount        !== undefined ? toDecimal(data.netAmount)   : undefined,
-        currencyCode:     data.currencyCode     !== undefined ? data.currencyCode           : undefined,
-        exchangeRate:     data.exchangeRate     !== undefined ? toDecimal(data.exchangeRate): undefined,
-        externalId:       data.externalId       !== undefined ? data.externalId             : undefined,
-        brokerNoteNumber: data.brokerNoteNumber !== undefined ? data.brokerNoteNumber       : undefined,
-        description:      data.description      !== undefined ? data.description            : undefined,
-        importedFrom:     data.importedFrom     !== undefined ? data.importedFrom           : undefined,
-        importedRowRef:   data.importedRowRef   !== undefined ? data.importedRowRef         : undefined,
-      },
-      include: transactionInclude,
+      return tx.transaction.update({
+        where: { id },
+        data: {
+          accountId:        data.accountId        !== undefined ? data.accountId        : undefined,
+          assetId:          data.assetId          !== undefined ? data.assetId          : undefined,
+          type:             data.type             !== undefined ? (data.type as any)    : undefined,
+          status:           data.status           !== undefined ? (data.status as any)  : undefined,
+          tradeDate:        data.tradeDate        ?? undefined,
+          settlementDate:   data.settlementDate   !== undefined ? data.settlementDate   : undefined,
+          quantity:         data.quantity         !== undefined ? toDecimal(data.quantity)    : undefined,
+          unitPrice:        data.unitPrice        !== undefined ? toDecimal(data.unitPrice)   : undefined,
+          grossAmount:      data.grossAmount      !== undefined
+                              ? new Prisma.Decimal(data.grossAmount as string | number | Prisma.Decimal)
+                              : undefined,
+          fees:             data.fees             !== undefined ? toDecimal(data.fees)         : undefined,
+          taxes:            data.taxes            !== undefined ? toDecimal(data.taxes)        : undefined,
+          netAmount:        data.netAmount        !== undefined ? toDecimal(data.netAmount)    : undefined,
+          currencyCode:     data.currencyCode     !== undefined ? data.currencyCode            : undefined,
+          exchangeRate:     data.exchangeRate     !== undefined ? toDecimal(data.exchangeRate) : undefined,
+          externalId:       data.externalId       !== undefined ? data.externalId              : undefined,
+          brokerNoteNumber: data.brokerNoteNumber !== undefined ? data.brokerNoteNumber        : undefined,
+          description:      data.description      !== undefined ? data.description             : undefined,
+          importedFrom:     data.importedFrom     !== undefined ? data.importedFrom            : undefined,
+          importedRowRef:   data.importedRowRef   !== undefined ? data.importedRowRef          : undefined,
+        },
+        include: transactionInclude,
+      })
     })
 
-    // Regenera a semana da data original e a semana da nova data (se mudou)
     triggerSnapshotRegen(existing.tradeDate)
     if (data.tradeDate && data.tradeDate.getTime() !== existing.tradeDate.getTime()) {
       triggerSnapshotRegen(data.tradeDate)

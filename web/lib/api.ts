@@ -6,21 +6,20 @@ export const api = axios.create({
   baseURL: API_URL,
   timeout: 15_000,
   headers: { 'Content-Type': 'application/json' },
+  // Envia cookies (incluindo o HttpOnly sig_token) em toda requisição.
+  // Requer que a API tenha CORS com credentials habilitado.
+  withCredentials: true,
 })
 
-api.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('sig_token')
-    if (token) config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
+// Não há mais interceptor de request para injetar Bearer token —
+// o cookie HttpOnly é enviado automaticamente pelo browser.
 
 api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('sig_token')
+      // Limpa o cookie de sinalização e redireciona para login
+      document.cookie = 'sig_auth=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT'
       window.location.href = '/login'
     }
     return Promise.reject(err)
@@ -116,7 +115,6 @@ export type PerformanceData = {
   periodEnd: string
 }
 
-// Proventos
 export type DividendEvent = {
   ticker: string
   assetClass: string
@@ -151,7 +149,6 @@ export type DividendSummary = {
   avgPerYear: DividendAvgPerYear[]
 }
 
-// Performance — GET /performance/summary
 export type PerformanceSummary = {
   startReferenceDate: string
   endReferenceDate: string
@@ -166,7 +163,6 @@ export type PerformanceSummary = {
   returnPercentage: number | null
 }
 
-// Performance — GET /performance/timeline
 export type TimelinePoint = {
   referenceDate: string
   period: string
@@ -195,7 +191,6 @@ export type PerformanceTimeline = {
   }
 }
 
-// Performance — GET /performance/by-class
 export type PerformanceByClassItem = {
   assetClassId: string
   code: string

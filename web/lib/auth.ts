@@ -1,57 +1,81 @@
 import { api } from './api'
 
-const TOKEN_KEY = 'sig_token'
+/**
+ * Autenticação via cookie HttpOnly.
+ *
+ * O token NÃO é mais armazenado em localStorage — isso elimina a exposição
+ * a ataques XSS. A API emite o cookie `sig_token` com as flags:
+ *   - HttpOnly  → JS do browser não consegue ler
+ *   - SameSite=Lax → protege contra CSRF
+ *   - Secure    → HTTPS obrigatório em produção
+ *
+ * O Axios envia o cookie automaticamente em toda requisição via
+ * `withCredentials: true` (configurado em api.ts).
+ *
+ * `isAuthenticated()` usa um cookie de sinalização NÃO-HttpOnly
+ * (`sig_auth=1`) que o frontend pode ler apenas para saber se há
+ * uma sessão ativa, sem expor o token em si.
+ */
 
-function setCookie(name: string, value: string, hours = 8) {
+const AUTH_FLAG_KEY = 'sig_auth' // cookie legível pelo JS (não contém o token)
+
+function setAuthFlag(hours = 8) {
   if (typeof document === 'undefined') return
   const expires = new Date(Date.now() + hours * 3600 * 1000).toUTCString()
-  document.cookie = `${name}=${value}; path=/; expires=${expires}; SameSite=Lax`
+  document.cookie = `${AUTH_FLAG_KEY}=1; path=/; expires=${expires}; SameSite=Lax`
 }
 
-function deleteCookie(name: string) {
+function clearAuthFlag() {
   if (typeof document === 'undefined') return
-  document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
+  document.cookie = `${AUTH_FLAG_KEY}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
+}
+
+function readCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null
+  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`))  
+  return match ? decodeURIComponent(match[1]) : null
 }
 
 /**
  * Dispara snapshot de hoje de forma silenciosa (fire-and-forget).
- * Não bloqueia o login nem mostra erro ao usuário se falhar.
  */
 async function triggerTodaySnapshot(): Promise<void> {
   try {
     await api.post('/portfolio-snapshots/generate', { period: 'DAILY' })
     console.log('[auth] Snapshot de hoje disparado após login.')
   } catch {
-    // Silencioso — falha não impacta o usuário
     console.warn('[auth] Não foi possível gerar snapshot no login.')
   }
 }
 
 export const authService = {
   async login(username: string, password: string): Promise<void> {
-    const res = await api.post<{ token: string }>('/auth/login', { username, password })
-    const token = res.data.token
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(TOKEN_KEY, token)
-      setCookie(TOKEN_KEY, token, 8)
-    }
-    // Dispara snapshot do dia atual logo após o login (não aguarda)
+    // A API define o cookie HttpOnly `sig_token` automaticamente na resposta.
+    // O frontend não precisa (nem consegue) ler o token.
+    await api.post('/auth/login', { username, password })
+    setAuthFlag(8)
     triggerTodaySnapshot()
   },
 
-  logout(): void {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(TOKEN_KEY)
-      deleteCookie(TOKEN_KEY)
+  async logout(): Promise<void> {
+    try {
+      // Pede à API para limpar o cookie HttpOnly no servidor
+      await api.post('/auth/logout')
+    } catch {
+      // Silencioso — mesmo que a API falhe, limpamos o flag local
+    } finally {
+      clearAuthFlag()
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login'
+      }
     }
   },
 
-  getToken(): string | null {
-    if (typeof window === 'undefined') return null
-    return localStorage.getItem(TOKEN_KEY)
-  },
-
+  /**
+   * Verifica existência da sessão pelo cookie de sinalização.
+   * Não expõe o token JWT em si.
+   */
   isAuthenticated(): boolean {
-    return !!this.getToken()
+    return readCookie(AUTH_FLAG_KEY) === '1'
   },
 }

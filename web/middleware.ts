@@ -6,22 +6,19 @@ const PUBLIC_PATHS = ['/login']
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Rotas públicas sempre liberadas
   if (PUBLIC_PATHS.some(p => pathname.startsWith(p))) {
     return NextResponse.next()
   }
 
-  // Verifica token no cookie (para SSR) ou deixa o cliente redirecionar via interceptor
-  const token = request.cookies.get('sig_token')?.value
+  // `sig_token` é HttpOnly — o middleware do Next.js (que roda no Edge)
+  // consegue ler cookies HttpOnly via `request.cookies`.
+  // `sig_auth` é o flag legível pelo JS do browser.
+  // Qualquer um deles é suficiente para considerar sessão ativa.
+  const hasToken    = !!request.cookies.get('sig_token')?.value
+  const hasAuthFlag = !!request.cookies.get('sig_auth')?.value
 
-  // Se não há token no cookie (client-side usa localStorage), deixa passar
-  // O interceptor Axios cuida do redirecionamento em 401
-  if (!token) {
-    // Redireciona apenas se for navegação sem JS (bots, crawlers)
-    const isNavigationRequest = request.headers.get('sec-fetch-mode') === 'navigate'
-    if (isNavigationRequest) {
-      return NextResponse.redirect(new URL('/login', request.url))
-    }
+  if (!hasToken && !hasAuthFlag) {
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
   return NextResponse.next()
