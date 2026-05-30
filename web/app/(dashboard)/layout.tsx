@@ -4,7 +4,8 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   TrendingUp, LayoutDashboard, Briefcase, Building2,
-  PiggyBank, ArrowLeftRight, PieChart, LogOut, Menu, X, Plus, HandCoins,
+  PiggyBank, ArrowLeftRight, PieChart, LogOut, Menu, X, Plus,
+  HandCoins, Wallet, BarChart3,
 } from 'lucide-react'
 import { useState } from 'react'
 import { authService } from '@/lib/auth'
@@ -12,22 +13,23 @@ import { NewTransactionDrawer } from '@/components/transactions/NewTransactionDr
 import { useAutoSnapshot } from '@/lib/hooks/useAutoSnapshot'
 
 const NAV = [
-  { href: '/',               label: 'Dashboard',     icon: LayoutDashboard },
-  { href: '/portfolio',      label: 'Portfólio',      icon: Briefcase       },
-  { href: '/dividends',      label: 'Proventos',      icon: HandCoins       },
-  { href: '/treasury',       label: 'Tesouro Direto', icon: Building2       },
-  { href: '/fixed-income',   label: 'Renda Fixa',     icon: PiggyBank       },
-  { href: '/transactions',   label: 'Transações',    icon: ArrowLeftRight  },
-  { href: '/allocation',     label: 'Alocação',      icon: PieChart        },
+  { href: '/',             label: 'Dashboard',     icon: LayoutDashboard },
+  { href: '/portfolio',    label: 'Portfólio',      icon: Briefcase       },
+  { href: '/patrimony',    label: 'Patrimônio',     icon: Wallet          },
+  { href: '/performance',  label: 'Rentabilidade',  icon: BarChart3       },
+  { href: '/dividends',    label: 'Proventos',      icon: HandCoins       },
+  { href: '/treasury',     label: 'Tesouro Direto', icon: Building2       },
+  { href: '/fixed-income', label: 'Renda Fixa',     icon: PiggyBank       },
+  { href: '/transactions', label: 'Transações',    icon: ArrowLeftRight  },
+  { href: '/allocation',   label: 'Alocação',      icon: PieChart        },
 ]
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const pathname    = usePathname()
-  const router      = useRouter()
-  const [open, setOpen]         = useState(false)
+  const pathname = usePathname()
+  const router   = useRouter()
+  const [open, setOpen]             = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
-  // Snapshot automático a cada 1 hora enquanto o usuário está logado
   useAutoSnapshot()
 
   const handleLogout = () => {
@@ -63,7 +65,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
-      {/* Logo */}
       <div className="flex items-center gap-3 px-4 py-5 border-b border-[var(--color-border-subtle)]">
         <div className="w-7 h-7 rounded-md bg-[var(--color-primary)] flex items-center justify-center flex-shrink-0">
           <TrendingUp size={14} className="text-white" />
@@ -76,7 +77,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       <NavLinks />
 
-      {/* Rodapé */}
       <div className="px-3 py-4 border-t border-[var(--color-border-subtle)]">
         <button
           onClick={handleLogout}
@@ -91,18 +91,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex h-dvh bg-[var(--color-bg)] overflow-hidden">
-
-      {/* Sidebar desktop */}
       <aside className="hidden lg:flex w-56 flex-col flex-shrink-0 bg-[var(--color-surface)] border-r border-[var(--color-border-subtle)]">
         <SidebarContent />
       </aside>
 
-      {/* Sidebar mobile overlay */}
       {open && (
-        <div
-          className="fixed inset-0 z-40 bg-black/60 lg:hidden"
-          onClick={() => setOpen(false)}
-        />
+        <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={() => setOpen(false)} />
       )}
       <aside className={`
         fixed inset-y-0 left-0 z-50 w-64 flex flex-col
@@ -124,15 +118,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <NavLinks />
       </aside>
 
-      {/* Main */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-
-        {/* Header mobile */}
         <header className="flex lg:hidden items-center gap-3 px-4 h-14 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)] flex-shrink-0">
-          <button
-            onClick={() => setOpen(true)}
-            className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-          >
+          <button onClick={() => setOpen(true)} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">
             <Menu size={20} />
           </button>
           <div className="flex items-center gap-2">
@@ -143,21 +131,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        {/* Conteúdo da página */}
         <main className="flex-1 overflow-y-auto">
           {children}
         </main>
       </div>
 
-      {/* Botão + flutuante global */}
       <button
         onClick={() => setDrawerOpen(true)}
         aria-label="Novo lançamento"
         className="
-          fixed bottom-6 right-6 z-30
-          w-13 h-13 rounded-full
-          bg-[var(--color-primary)] text-white
-          shadow-lg hover:bg-[var(--color-primary-hover)]
+          fixed bottom-6 right-6 z-30 rounded-full
+          bg-[var(--color-primary)] text-white shadow-lg
+          hover:bg-[var(--color-primary-hover)]
           flex items-center justify-center
           transition-all duration-200 hover:scale-105 active:scale-95
           focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:ring-offset-2
@@ -167,7 +152,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <Plus size={22} strokeWidth={2.5} />
       </button>
 
-      {/* Drawer de novo lançamento */}
       <NewTransactionDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}

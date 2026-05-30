@@ -8,7 +8,6 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Request: injeta JWT em toda requisição autenticada
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('sig_token')
@@ -17,7 +16,6 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Response: redireciona para /login em 401
 api.interceptors.response.use(
   (res) => res,
   (err) => {
@@ -29,13 +27,10 @@ api.interceptors.response.use(
   },
 )
 
-// ---- Helpers de tipo ----
 export type ApiError = {
   message: string
   statusCode: number
 }
-
-// ---- Tipagens das respostas da API ----
 
 export type PortfolioSnapshot = {
   id: string
@@ -121,7 +116,7 @@ export type PerformanceData = {
   periodEnd: string
 }
 
-// Shape real retornado por GET /dividends/summary
+// Proventos
 export type DividendEvent = {
   ticker: string
   assetClass: string
@@ -135,7 +130,7 @@ export type DividendByClass = {
 }
 
 export type DividendByMonth = {
-  month: string        // "YYYY-MM"
+  month: string
   total: number
   byClass: DividendByClass[]
   events: DividendEvent[]
@@ -154,4 +149,69 @@ export type DividendSummary = {
   byMonth: DividendByMonth[]
   last12Months: { month: string; total: number }[]
   avgPerYear: DividendAvgPerYear[]
+}
+
+// Performance — GET /performance/summary
+export type PerformanceSummary = {
+  startReferenceDate: string
+  endReferenceDate: string
+  requestedStartDate: string
+  requestedEndDate: string
+  period: 'DAILY' | 'WEEKLY'
+  initialMarketValue: number
+  finalMarketValue: number
+  netContributions: number
+  capitalGain: number
+  absoluteChange: number
+  returnPercentage: number | null
+}
+
+// Performance — GET /performance/timeline
+export type TimelinePoint = {
+  referenceDate: string
+  period: string
+  totalInvested: number
+  totalMarketValue: number
+  totalProfitLoss: number
+  totalProfitLossPct: number | null
+  totalIncome: number
+  cashBalance: number
+}
+
+export type PerformanceTimeline = {
+  requestedStartDate: string
+  requestedEndDate: string
+  period: string
+  points: TimelinePoint[]
+  chart: {
+    labels: string[]
+    series: {
+      totalInvested: number[]
+      totalMarketValue: number[]
+      totalProfitLoss: number[]
+      totalIncome: number[]
+      cashBalance: number[]
+    }
+  }
+}
+
+// Performance — GET /performance/by-class
+export type PerformanceByClassItem = {
+  assetClassId: string
+  code: string
+  name: string
+  investedAmount: number
+  marketValue: number
+  profitLoss: number
+  currentPercentage: number | null
+  targetPercentage: number | null
+  rebalanceDifference: number | null
+  suggestedContribution: number | null
+}
+
+export type PerformanceByClass = {
+  requestedEndDate: string
+  snapshotReferenceDate: string
+  period: string
+  classes: PerformanceByClassItem[]
 }
