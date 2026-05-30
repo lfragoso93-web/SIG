@@ -12,33 +12,61 @@ const parseIsoDateOnlyToUtcDate = (value: unknown) => {
   return value
 }
 
+/** Retorna hoje em UTC meia-noite */
+const todayUTC = () => {
+  const d = new Date()
+  d.setUTCHours(0, 0, 0, 0)
+  return d
+}
+
+/** Retorna 12 meses atrás em UTC meia-noite */
+const twelveMonthsAgoUTC = () => {
+  const d = todayUTC()
+  d.setUTCFullYear(d.getUTCFullYear() - 1)
+  return d
+}
+
 export const performanceSummaryQuerySchema = z.object({
-  startDate: z.preprocess(parseIsoDateOnlyToUtcDate, z.date()),
-  endDate:   z.preprocess(parseIsoDateOnlyToUtcDate, z.date()),
+  // startDate e endDate são opcionais — default: últimos 12 meses.
+  // Isso permite que o dashboard chame o endpoint sem parâmetros.
+  startDate: z.preprocess(parseIsoDateOnlyToUtcDate, z.date().optional()),
+  endDate:   z.preprocess(parseIsoDateOnlyToUtcDate, z.date().optional()),
   period:    z.nativeEnum(SnapshotPeriod).optional().default(SnapshotPeriod.WEEKLY),
-}).refine((d) => d.startDate <= d.endDate, {
+}).transform((d) => ({
+  startDate: d.startDate ?? twelveMonthsAgoUTC(),
+  endDate:   d.endDate   ?? todayUTC(),
+  period:    d.period,
+})).refine((d) => d.startDate <= d.endDate, {
   message: 'startDate deve ser menor ou igual a endDate',
   path: ['startDate'],
 })
 
 export const performanceTimelineQuerySchema = z.object({
-  startDate: z.preprocess(parseIsoDateOnlyToUtcDate, z.date()),
-  endDate:   z.preprocess(parseIsoDateOnlyToUtcDate, z.date()),
+  startDate: z.preprocess(parseIsoDateOnlyToUtcDate, z.date().optional()),
+  endDate:   z.preprocess(parseIsoDateOnlyToUtcDate, z.date().optional()),
   period:    z.nativeEnum(SnapshotPeriod).optional().default(SnapshotPeriod.WEEKLY),
-}).refine((d) => d.startDate <= d.endDate, {
+}).transform((d) => ({
+  startDate: d.startDate ?? twelveMonthsAgoUTC(),
+  endDate:   d.endDate   ?? todayUTC(),
+  period:    d.period,
+})).refine((d) => d.startDate <= d.endDate, {
   message: 'startDate deve ser menor ou igual a endDate',
   path: ['startDate'],
 })
 
 export const performanceByClassQuerySchema = z.object({
-  endDate: z.preprocess(parseIsoDateOnlyToUtcDate, z.date()),
+  endDate: z.preprocess(parseIsoDateOnlyToUtcDate, z.date().optional()),
   monthlyContribution: z.preprocess((v) => {
     if (v === undefined || v === null || v === '') return undefined
     if (typeof v === 'string') return Number(v.replace(',', '.'))
     return v
   }, z.number().nonnegative().optional().default(0)),
   period: z.nativeEnum(SnapshotPeriod).optional().default(SnapshotPeriod.WEEKLY),
-})
+}).transform((d) => ({
+  endDate: d.endDate ?? todayUTC(),
+  monthlyContribution: d.monthlyContribution,
+  period: d.period,
+}))
 
 export const monthlyReportQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, 'month deve estar no formato YYYY-MM'),
