@@ -9,21 +9,32 @@ import {
 
 const parsePeriod = (raw: unknown): SnapshotPeriodType => {
   if (raw === 'DAILY' || raw === 'WEEKLY') return raw as SnapshotPeriodType;
-  return 'WEEKLY';
+  return 'DAILY';
 };
 
+/**
+ * POST /portfolio-snapshots/generate
+ * Body (todos opcionais):
+ *   referenceDate?: string  — padrão: hoje
+ *   period?:        string  — padrão: 'DAILY'
+ *
+ * Usado tanto pelo botão manual quanto pelo trigger automático do front-end.
+ */
 export const generateSnapshotHandler = async (req: Request, res: Response) => {
   const { referenceDate, period } = req.body as { referenceDate?: string; period?: string };
-  if (!referenceDate) {
-    res.status(400).json({ error: 'referenceDate é obrigatório.' });
-    return;
-  }
-  const snap = await generateSnapshot(new Date(referenceDate), parsePeriod(period));
+
+  // Se não vier referenceDate, usa a data de hoje no fuso de Brasília
+  const targetDate = referenceDate
+    ? new Date(referenceDate)
+    : new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
+
+  const snap = await generateSnapshot(targetDate, parsePeriod(period));
   if (snap === null) {
-    res.status(422).json({ error: 'Nenhum preço disponível para essa data (feriado ou fim de semana).' });
+    // Feriado ou fim de semana — retorna 200 com flag, não é erro
+    res.status(200).json({ skipped: true, reason: 'Nenhum preço disponível para essa data.' });
     return;
   }
-  res.json(snap);
+  res.json({ skipped: false, snapshot: snap });
 };
 
 export const generateSnapshotRangeHandler = async (req: Request, res: Response) => {
@@ -55,7 +66,7 @@ export const listSnapshotsHandler = async (req: Request, res: Response) => {
 export const getSnapshotByDateHandler = async (req: Request, res: Response) => {
   const period = req.query.period as string | undefined;
   const snap = await getSnapshotByDate(
-    new Date(req.params.date as string),  // ← cast aqui
+    new Date(req.params.date as string),
     parsePeriod(period),
   );
   if (!snap) {

@@ -9,6 +9,7 @@ import {
 import { useState } from 'react'
 import { authService } from '@/lib/auth'
 import { NewTransactionDrawer } from '@/components/transactions/NewTransactionDrawer'
+import { useAutoSnapshot } from '@/lib/hooks/useAutoSnapshot'
 
 const NAV = [
   { href: '/',               label: 'Dashboard',     icon: LayoutDashboard },
@@ -25,6 +26,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router      = useRouter()
   const [open, setOpen]         = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
+
+  // Snapshot automático a cada 1 hora enquanto o usuário está logado
+  useAutoSnapshot()
 
   const handleLogout = () => {
     authService.logout()

@@ -13,6 +13,20 @@ function deleteCookie(name: string) {
   document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
 }
 
+/**
+ * Dispara snapshot de hoje de forma silenciosa (fire-and-forget).
+ * Não bloqueia o login nem mostra erro ao usuário se falhar.
+ */
+async function triggerTodaySnapshot(): Promise<void> {
+  try {
+    await api.post('/portfolio-snapshots/generate', { period: 'DAILY' })
+    console.log('[auth] Snapshot de hoje disparado após login.')
+  } catch {
+    // Silencioso — falha não impacta o usuário
+    console.warn('[auth] Não foi possível gerar snapshot no login.')
+  }
+}
+
 export const authService = {
   async login(username: string, password: string): Promise<void> {
     const res = await api.post<{ token: string }>('/auth/login', { username, password })
@@ -21,6 +35,8 @@ export const authService = {
       localStorage.setItem(TOKEN_KEY, token)
       setCookie(TOKEN_KEY, token, 8)
     }
+    // Dispara snapshot do dia atual logo após o login (não aguarda)
+    triggerTodaySnapshot()
   },
 
   logout(): void {
