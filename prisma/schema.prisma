@@ -2,9 +2,6 @@ generator client {
   provider = "prisma-client-js"
 }
 
-// A URL é lida de DATABASE_URL em runtime.
-// O prisma.config.ts sobrescreve via process.env em dev/migrations,
-// mas o schema.prisma precisa do campo url para validação do Prisma CLI.
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -15,15 +12,25 @@ datasource db {
 model User {
   id           String   @id @default(cuid())
   username     String   @unique @db.VarChar(80)
+  email        String?  @unique @db.VarChar(150)
   passwordHash String   @db.VarChar(255)
   displayName  String?  @db.VarChar(120)
-  role         UserRole @default(ADMIN)
+  role         UserRole @default(VIEWER)
   isActive     Boolean  @default(true)
   lastLoginAt  DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  // Dados financeiros do usuário
+  accounts           Account[]
+  transactions       Transaction[]
+  incomeEvents       IncomeEvent[]
+  portfolioItems     PortfolioItem[]
+  portfolioSnapshots PortfolioSnapshot[]
+  allocationTargets  AllocationTarget[]
+
   @@index([username])
+  @@index([email])
 }
 
 enum UserRole {
@@ -32,23 +39,6 @@ enum UserRole {
 }
 
 /// Tabela de referência para classificação macro dos ativos.
-///
-/// Códigos esperados em `code` após a migration:
-/// - DOMESTIC_STOCK: ação nacional
-/// - STOCK: ação internacional individual
-/// - ETF: ETF nacional
-/// - INTERNATIONAL_ETF: ETF internacional
-/// - FII: fundo imobiliário
-/// - BDR: Brazilian Depositary Receipt
-/// - CRYPTO: criptoativo
-/// - FIXED_INCOME: renda fixa privada/bancária
-/// - TREASURY: Tesouro Direto
-/// - CASH: caixa / saldo parado
-///
-/// Observação:
-/// - EXTERIOR não deve mais existir.
-/// - STOCK não representa mais ação nacional.
-/// - Ação nacional deve ser sempre DOMESTIC_STOCK.
 model AssetClass {
   id                String                   @id @default(cuid())
   code              String                   @unique @db.VarChar(50)
@@ -79,6 +69,7 @@ model Institution {
 
 model Account {
   id                      String                   @id @default(cuid())
+  userId                  String
   name                    String                   @db.VarChar(120)
   type                    AccountType
   institutionId           String?
@@ -87,13 +78,15 @@ model Account {
   notes                   String?
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
+  user                    User                     @relation(fields: [userId], references: [id])
   institution             Institution?             @relation(fields: [institutionId], references: [id])
   incomeEvents            IncomeEvent[]
   portfolioAssetSnapshots PortfolioAssetSnapshot[]
   portfolioItems          PortfolioItem[]
   transactions            Transaction[]
 
-  @@unique([name, institutionId])
+  @@unique([userId, name, institutionId])
+  @@index([userId])
   @@index([type])
   @@index([institutionId])
 }
@@ -113,11 +106,8 @@ model Asset {
   issuer         String?                  @db.VarChar(150)
   maturityDate   DateTime?                @db.Date
   indexer        String?                  @db.VarChar(30)
-  /// Cobertura FGC (CDB, LCI, LCA — até R$250k/inst.)
   fgcProtected   Boolean                  @default(false)
-  /// Isento de IR (LCI, LCA, CRI, CRA)
   irExempt       Boolean                  @default(false)
-  /// Liquidez em dias corridos: 0 = diária | null = só no vencimento | N = carência
   liquidityDays  Int?
   isActive       Boolean                  @default(true)
   notes          String?
@@ -137,6 +127,7 @@ model Asset {
 
 model Transaction {
   id               String            @id @default(cuid())
+  userId           String
   accountId        String?
   assetId          String?
   type             TransactionType
@@ -158,10 +149,12 @@ model Transaction {
   importedRowRef   String?           @db.VarChar(100)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
+  user             User              @relation(fields: [userId], references: [id])
   account          Account?          @relation(fields: [accountId], references: [id])
   asset            Asset?            @relation(fields: [assetId], references: [id])
 
-  @@unique([accountId, externalId], map: "transaction_account_externalId_unique")
+  @@unique([userId, accountId, externalId], map: "transaction_user_account_externalId_unique")
+  @@index([userId, tradeDate])
   @@index([accountId, tradeDate])
   @@index([assetId, tradeDate])
   @@index([type, tradeDate])
@@ -169,6 +162,7 @@ model Transaction {
 
 model IncomeEvent {
   id            String       @id @default(cuid())
+  userId        String
   assetId       String
   accountId     String?
   type          IncomeType
@@ -187,10 +181,12 @@ model IncomeEvent {
   notes         String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
+  user          User         @relation(fields: [userId], references: [id])
   account       Account?     @relation(fields: [accountId], references: [id])
   asset         Asset        @relation(fields: [assetId], references: [id])
 
-  @@unique([assetId, externalId], map: "income_event_asset_externalId_unique")
+  @@unique([userId, assetId, externalId], map: "income_event_user_asset_externalId_unique")
+  @@index([userId, paymentDate])
   @@index([assetId, paymentDate])
   @@index([accountId, paymentDate])
   @@index([type, paymentDate])
@@ -217,6 +213,7 @@ model PriceHistory {
 
 model AllocationTarget {
   id               String     @id @default(cuid())
+  userId           String
   assetClassId     String
   targetPercentage Decimal    @db.Decimal(7, 4)
   effectiveFrom    DateTime   @db.Date
@@ -224,14 +221,17 @@ model AllocationTarget {
   notes            String?
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
+  user             User       @relation(fields: [userId], references: [id])
   assetClass       AssetClass @relation(fields: [assetClassId], references: [id], onDelete: Cascade)
 
-  @@unique([assetClassId, effectiveFrom])
+  @@unique([userId, assetClassId, effectiveFrom])
+  @@index([userId])
   @@index([effectiveFrom, effectiveTo])
 }
 
 model PortfolioSnapshot {
   id                 String                   @id @default(cuid())
+  userId             String
   referenceDate      DateTime                 @db.Date
   period             SnapshotPeriod           @default(MONTHLY)
   totalInvested      Decimal                  @default(0) @db.Decimal(20, 2)
@@ -243,11 +243,12 @@ model PortfolioSnapshot {
   notes              String?
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
+  user               User                     @relation(fields: [userId], references: [id])
   assetSnapshots     PortfolioAssetSnapshot[]
   classSnapshots     PortfolioClassSnapshot[]
 
-  @@unique([referenceDate, period])
-  @@index([referenceDate])
+  @@unique([userId, referenceDate, period])
+  @@index([userId, referenceDate])
 }
 
 model PortfolioClassSnapshot {
@@ -296,6 +297,7 @@ model PortfolioAssetSnapshot {
 
 model PortfolioItem {
   id             String    @id @default(cuid())
+  userId         String
   assetId        String
   accountId      String?
   quantity       Decimal   @default(0) @db.Decimal(20, 8)
@@ -308,10 +310,12 @@ model PortfolioItem {
   lastUpdatedAt  DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+  user           User      @relation(fields: [userId], references: [id])
   account        Account?  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   asset          Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
-  @@unique([assetId, accountId])
+  @@unique([userId, assetId, accountId])
+  @@index([userId])
   @@index([accountId])
 }
 

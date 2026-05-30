@@ -1,14 +1,11 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../core/prisma/prisma.service';
 
-// ─── helpers ────────────────────────────────────────────────────────────────
-
 function toNum(val: unknown): number {
   if (val === null || val === undefined) return 0;
   return parseFloat(String(val));
 }
 
-/** Retorna a sexta-feira da semana de uma data qualquer. */
 function toFriday(date: Date): Date {
   const d = new Date(date);
   d.setUTCHours(0, 0, 0, 0);
@@ -18,14 +15,12 @@ function toFriday(date: Date): Date {
   return d;
 }
 
-/** Normaliza qualquer data para meia-noite UTC. */
 function toMidnightUTC(date: Date): Date {
   const d = new Date(date);
   d.setUTCHours(0, 0, 0, 0);
   return d;
 }
 
-/** Gera todas as sextas-feiras entre start e end (inclusive). */
 function fridaysBetween(start: Date, end: Date): Date[] {
   const fridays: Date[] = [];
   let current = toFriday(start);
@@ -38,7 +33,6 @@ function fridaysBetween(start: Date, end: Date): Date[] {
   return fridays;
 }
 
-/** Gera todos os dias úteis (seg–sex) entre start e end (inclusive). */
 function weekdaysBetween(start: Date, end: Date): Date[] {
   const days: Date[] = [];
   const current = toMidnightUTC(start);
@@ -50,8 +44,6 @@ function weekdaysBetween(start: Date, end: Date): Date[] {
   }
   return days;
 }
-
-// ─── cálculo de posição até uma data ─────────────────────────────────────────
 
 const BUY_TYPES  = ['BUY', 'BONUS', 'SPLIT'];
 const SELL_TYPES = ['SELL', 'REVERSE_SPLIT'];
@@ -75,16 +67,15 @@ function calcPosition(txs: { type: string; quantity: unknown; unitPrice: unknown
   return { quantity, totalCost, realizedPnL };
 }
 
-// ─── geração de snapshot ────────────────────────────────────────────────────
-
 export type SnapshotPeriodType = 'DAILY' | 'WEEKLY';
 
 export async function generateSnapshot(
+  userId: string,
   referenceDate: Date,
   period: SnapshotPeriodType = 'WEEKLY',
 ) {
-  const anchor     = period === 'WEEKLY' ? toFriday(referenceDate) : toMidnightUTC(referenceDate);
-  const anchorEnd  = new Date(anchor);
+  const anchor    = period === 'WEEKLY' ? toFriday(referenceDate) : toMidnightUTC(referenceDate);
+  const anchorEnd = new Date(anchor);
   anchorEnd.setUTCHours(23, 59, 59, 999);
 
   const assetClasses = await prisma.assetClass.findMany({
@@ -95,40 +86,29 @@ export async function generateSnapshot(
   const assets = await prisma.asset.findMany({
     where: {
       isActive: true,
-      transactions: { some: { status: 'POSTED', tradeDate: { lte: anchorEnd } } },
+      transactions: { some: { userId, status: 'POSTED', tradeDate: { lte: anchorEnd } } },
     },
     include: { assetClass: true },
   });
 
   if (assets.length === 0) return null;
 
-  let totalInvested    = 0;
-  let totalMarketValue = 0;
-  let totalIncome      = 0;
-
+  let totalInvested = 0, totalMarketValue = 0, totalIncome = 0;
   const assetSnapshots: Prisma.PortfolioAssetSnapshotCreateManySnapshotInput[] = [];
-
-  const byClass = new Map<string, {
-    assetClassId:     string;
-    invested:         number;
-    marketValue:      number;
-    targetPercentage: number | null;
-  }>();
+  const byClass = new Map<string, { assetClassId: string; invested: number; marketValue: number; targetPercentage: number | null }>();
 
   for (const ac of assetClasses) {
     byClass.set(ac.id, {
       assetClassId:     ac.id,
       invested:         0,
       marketValue:      0,
-      targetPercentage: ac.targetPercentage !== null && ac.targetPercentage !== undefined
-        ? toNum(ac.targetPercentage)
-        : null,
+      targetPercentage: ac.targetPercentage !== null && ac.targetPercentage !== undefined ? toNum(ac.targetPercentage) : null,
     });
   }
 
   for (const asset of assets) {
     const txs = await prisma.transaction.findMany({
-      where:   { assetId: asset.id, status: 'POSTED', tradeDate: { lte: anchorEnd } },
+      where:   { userId, assetId: asset.id, status: 'POSTED', tradeDate: { lte: anchorEnd } },
       orderBy: { tradeDate: 'asc' },
     });
 
@@ -147,7 +127,7 @@ export async function generateSnapshot(
     const profitLoss  = marketValue - investedAmount;
 
     const incomeAgg = await prisma.incomeEvent.aggregate({
-      where: { assetId: asset.id, status: { in: ['CONFIRMED', 'PAID'] }, paymentDate: { lte: anchorEnd } },
+      where: { userId, assetId: asset.id, status: { in: ['CONFIRMED', 'PAID'] }, paymentDate: { lte: anchorEnd } },
       _sum:  { netAmount: true, grossAmount: true },
     });
     const incomeReceived = toNum(incomeAgg._sum.netAmount ?? incomeAgg._sum.grossAmount);
@@ -169,12 +149,7 @@ export async function generateSnapshot(
       incomeReceived: new Prisma.Decimal(incomeReceived),
     });
 
-    const cls = byClass.get(asset.assetClassId) ?? {
-      assetClassId:     asset.assetClassId,
-      invested:         0,
-      marketValue:      0,
-      targetPercentage: null,
-    };
+    const cls = byClass.get(asset.assetClassId) ?? { assetClassId: asset.assetClassId, invested: 0, marketValue: 0, targetPercentage: null };
     cls.invested    += investedAmount;
     cls.marketValue += marketValue;
     byClass.set(asset.assetClassId, cls);
@@ -185,14 +160,9 @@ export async function generateSnapshot(
   const totalProfitLoss    = totalMarketValue - totalInvested;
   const totalProfitLossPct = totalInvested > 0 ? totalProfitLoss / totalInvested : 0;
 
-  const classSnapshots: Prisma.PortfolioClassSnapshotCreateManySnapshotInput[] = [
-    ...byClass.values(),
-  ].map((cls) => {
+  const classSnapshots: Prisma.PortfolioClassSnapshotCreateManySnapshotInput[] = [...byClass.values()].map((cls) => {
     const currentPct = totalMarketValue > 0 ? cls.marketValue / totalMarketValue : 0;
     const targetPct  = cls.targetPercentage;
-    const rebalanceDifference = targetPct !== null
-      ? new Prisma.Decimal((targetPct - currentPct) * totalMarketValue)
-      : null;
     return {
       assetClassId:          cls.assetClassId,
       investedAmount:        new Prisma.Decimal(cls.invested),
@@ -200,13 +170,13 @@ export async function generateSnapshot(
       profitLoss:            new Prisma.Decimal(cls.marketValue - cls.invested),
       currentPercentage:     new Prisma.Decimal(currentPct),
       targetPercentage:      targetPct !== null ? new Prisma.Decimal(targetPct) : null,
-      rebalanceDifference,
+      rebalanceDifference:   targetPct !== null ? new Prisma.Decimal((targetPct - currentPct) * totalMarketValue) : null,
       suggestedContribution: null,
     };
   });
 
   const snapshot = await prisma.portfolioSnapshot.upsert({
-    where:  { referenceDate_period: { referenceDate: anchor, period } },
+    where:  { userId_referenceDate_period: { userId, referenceDate: anchor, period } },
     update: {
       totalInvested:      new Prisma.Decimal(totalInvested),
       totalMarketValue:   new Prisma.Decimal(totalMarketValue),
@@ -217,6 +187,7 @@ export async function generateSnapshot(
       classSnapshots: { deleteMany: {}, createMany: { data: classSnapshots } },
     },
     create: {
+      userId,
       referenceDate:      anchor,
       period,
       totalInvested:      new Prisma.Decimal(totalInvested),
@@ -237,44 +208,31 @@ export async function generateSnapshot(
 }
 
 export async function generateSnapshotRange(
+  userId: string,
   startDate: Date,
   endDate:   Date,
   period:    SnapshotPeriodType = 'WEEKLY',
 ) {
-  const dates = period === 'WEEKLY'
-    ? fridaysBetween(startDate, endDate)
-    : weekdaysBetween(startDate, endDate);
-
-  let generated = 0;
-  let skipped   = 0;
+  const dates = period === 'WEEKLY' ? fridaysBetween(startDate, endDate) : weekdaysBetween(startDate, endDate);
+  let generated = 0, skipped = 0;
   const errors: { date: string; error: string }[] = [];
-
   for (const date of dates) {
     try {
-      const snap = await generateSnapshot(date, period);
-      if (snap !== null) {
-        generated++;
-      } else {
-        skipped++;
-      }
+      const snap = await generateSnapshot(userId, date, period);
+      snap !== null ? generated++ : skipped++;
     } catch (err) {
       errors.push({ date: date.toISOString().slice(0, 10), error: (err as Error).message });
     }
   }
-
   return { generated, skipped, errors: errors.length, errorDetails: errors };
 }
 
-export async function listSnapshots(from?: Date, to?: Date, period: SnapshotPeriodType = 'WEEKLY') {
+export async function listSnapshots(userId: string, from?: Date, to?: Date, period: SnapshotPeriodType = 'WEEKLY') {
   const snapshots = await prisma.portfolioSnapshot.findMany({
     where: {
+      userId,
       period,
-      ...(from || to ? {
-        referenceDate: {
-          ...(from ? { gte: from } : {}),
-          ...(to   ? { lte: to   } : {}),
-        },
-      } : {}),
+      ...(from || to ? { referenceDate: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
     },
     orderBy: { referenceDate: 'desc' },
     include: {
@@ -285,10 +243,10 @@ export async function listSnapshots(from?: Date, to?: Date, period: SnapshotPeri
   return snapshots.map(formatSnapshot);
 }
 
-export async function getSnapshotByDate(referenceDate: Date, period: SnapshotPeriodType = 'WEEKLY') {
-  const anchor = period === 'WEEKLY' ? toFriday(referenceDate) : toMidnightUTC(referenceDate);
+export async function getSnapshotByDate(userId: string, referenceDate: Date, period: SnapshotPeriodType = 'WEEKLY') {
+  const anchor   = period === 'WEEKLY' ? toFriday(referenceDate) : toMidnightUTC(referenceDate);
   const snapshot = await prisma.portfolioSnapshot.findUnique({
-    where: { referenceDate_period: { referenceDate: anchor, period } },
+    where: { userId_referenceDate_period: { userId, referenceDate: anchor, period } },
     include: {
       assetSnapshots: { include: { asset: { select: { ticker: true } } } },
       classSnapshots: { include: { assetClass: { select: { code: true, name: true } } } },
@@ -296,8 +254,6 @@ export async function getSnapshotByDate(referenceDate: Date, period: SnapshotPer
   });
   return snapshot ? formatSnapshot(snapshot) : null;
 }
-
-// ─── formatter ──────────────────────────────────────────────────────────────
 
 function formatSnapshot(s: any) {
   return {
@@ -326,12 +282,9 @@ function formatSnapshot(s: any) {
       marketValue:           toNum(c.marketValue),
       profitLoss:            toNum(c.profitLoss),
       currentPercentage:     toNum(c.currentPercentage),
-      targetPercentage:      c.targetPercentage !== null && c.targetPercentage !== undefined
-        ? toNum(c.targetPercentage) : null,
-      rebalanceDifference:   c.rebalanceDifference !== null && c.rebalanceDifference !== undefined
-        ? toNum(c.rebalanceDifference) : null,
-      suggestedContribution: c.suggestedContribution !== null && c.suggestedContribution !== undefined
-        ? toNum(c.suggestedContribution) : null,
+      targetPercentage:      c.targetPercentage !== null && c.targetPercentage !== undefined ? toNum(c.targetPercentage) : null,
+      rebalanceDifference:   c.rebalanceDifference !== null && c.rebalanceDifference !== undefined ? toNum(c.rebalanceDifference) : null,
+      suggestedContribution: c.suggestedContribution !== null && c.suggestedContribution !== undefined ? toNum(c.suggestedContribution) : null,
     })),
   };
 }

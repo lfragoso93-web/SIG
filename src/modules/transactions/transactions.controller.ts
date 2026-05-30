@@ -1,61 +1,49 @@
-import { Request, Response } from "express";
-import transactionsService from "./transactions.service";
-import {
-  createTransactionSchema,
-  updateTransactionSchema,
-  transactionIdParamSchema,
-} from "./transactions.schema";
+import { Request, Response, NextFunction } from 'express'
+import transactionsService from './transactions.service'
+import { createTransactionSchema, updateTransactionSchema } from './transactions.schema'
+import { AuthPayload } from '../../shared/middleware/authenticate'
 
-class TransactionsController {
-  async create(req: Request, res: Response) {
+function userId(req: Request): string {
+  return (req.user as AuthPayload).sub
+}
+
+export class TransactionsController {
+  async create(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = createTransactionSchema.parse(req.body);
-      const transaction = await transactionsService.create(data);
-      return res.status(201).json(transaction);
-    } catch (error: any) {
-      return res.status(400).json({ message: error.message });
-    }
+      const data = createTransactionSchema.parse(req.body)
+      const tx   = await transactionsService.create({ ...data, userId: userId(req) })
+      res.status(201).json(tx)
+    } catch (err) { next(err) }
   }
 
-  async findAll(_req: Request, res: Response) {
+  async findAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const transactions = await transactionsService.findAll();
-      return res.status(200).json(transactions);
-    } catch (error: any) {
-      return res.status(500).json({ message: error.message });
-    }
+      const txs = await transactionsService.findAll(userId(req))
+      res.json(txs)
+    } catch (err) { next(err) }
   }
 
-  async findById(req: Request, res: Response) {
+  async findById(req: Request, res: Response, next: NextFunction) {
     try {
-      const { id } = transactionIdParamSchema.parse(req.params);
-      const transaction = await transactionsService.findById(id);
-      return res.status(200).json(transaction);
-    } catch (error: any) {
-      return res.status(404).json({ message: error.message });
-    }
+      const tx = await transactionsService.findById(userId(req), req.params.id)
+      res.json(tx)
+    } catch (err) { next(err) }
   }
 
-  async update(req: Request, res: Response) {
+  async update(req: Request, res: Response, next: NextFunction) {
     try {
-      const { id } = transactionIdParamSchema.parse(req.params);
-      const data = updateTransactionSchema.parse(req.body);
-      const transaction = await transactionsService.update(id, data);
-      return res.status(200).json(transaction);
-    } catch (error: any) {
-      return res.status(400).json({ message: error.message });
-    }
+      const data = updateTransactionSchema.parse(req.body)
+      const tx   = await transactionsService.update(userId(req), req.params.id, data)
+      res.json(tx)
+    } catch (err) { next(err) }
   }
 
-  async remove(req: Request, res: Response) {
+  async remove(req: Request, res: Response, next: NextFunction) {
     try {
-      const { id } = transactionIdParamSchema.parse(req.params);
-      await transactionsService.remove(id);
-      return res.status(204).send();
-    } catch (error: any) {
-      return res.status(404).json({ message: error.message });
-    }
+      await transactionsService.remove(userId(req), req.params.id)
+      res.status(204).send()
+    } catch (err) { next(err) }
   }
 }
 
-export const transactionsController = new TransactionsController();
+export const transactionsController = new TransactionsController()

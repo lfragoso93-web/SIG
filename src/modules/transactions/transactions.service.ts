@@ -5,6 +5,7 @@ import { generateSnapshot } from '../portfolio-snapshots/portfolio-snapshots.ser
 type DecimalInput = string | number | Prisma.Decimal | null | undefined
 
 type CreateTransactionInput = {
+  userId:            string
   accountId?:        string | null
   assetId?:          string | null
   type:              string
@@ -63,33 +64,26 @@ const toDecimalOrNull = (value: DecimalInput): Prisma.Decimal | null => {
   return new Prisma.Decimal(value as string | number | Prisma.Decimal)
 }
 
-/**
- * Dispara a regeneração do snapshot WEEKLY da semana da transação
- * de forma assíncrona — não bloqueia a resposta da API.
- */
-function triggerSnapshotRegen(tradeDate: Date): void {
-  generateSnapshot(tradeDate, 'WEEKLY')
+function triggerSnapshotRegen(userId: string, tradeDate: Date): void {
+  generateSnapshot(userId, tradeDate, 'WEEKLY')
     .then(() => console.log(`[snapshot-trigger] WEEKLY regenerado para ${tradeDate.toISOString().slice(0, 10)}`))
     .catch((err) => console.error('[snapshot-trigger] Erro ao regenerar snapshot:', err))
 }
 
 class TransactionsService {
   async create(data: CreateTransactionInput) {
-    // Todas as validações + criação em uma única transação atômica.
-    // Se qualquer etapa falhar, o banco reverte completamente (ACID).
     const transaction = await prisma.$transaction(async (tx) => {
       if (data.accountId) {
-        const account = await tx.account.findUnique({ where: { id: data.accountId } })
+        const account = await tx.account.findFirst({ where: { id: data.accountId, userId: data.userId } })
         if (!account) throw new Error('Conta não encontrada.')
       }
-
       if (data.assetId) {
         const asset = await tx.asset.findUnique({ where: { id: data.assetId } })
         if (!asset) throw new Error('Ativo não encontrado.')
       }
-
       return tx.transaction.create({
         data: {
+          userId:           data.userId,
           accountId:        data.accountId        ?? null,
           assetId:          data.assetId          ?? null,
           type:             data.type              as any,
@@ -113,45 +107,40 @@ class TransactionsService {
         include: transactionInclude,
       })
     })
-
-    // Snapshot é disparado fora da $transaction — é um efeito colateral
-    // assíncrono que não deve impedir a resposta nem reverter a transação.
-    triggerSnapshotRegen(data.tradeDate)
+    triggerSnapshotRegen(data.userId, data.tradeDate)
     return transaction
   }
 
-  async findAll() {
+  async findAll(userId: string) {
     return prisma.transaction.findMany({
+      where:   { userId },
       orderBy: [{ tradeDate: 'desc' }, { createdAt: 'desc' }],
       include: transactionInclude,
     })
   }
 
-  async findById(id: string) {
-    const transaction = await prisma.transaction.findUnique({
-      where: { id },
+  async findById(userId: string, id: string) {
+    const transaction = await prisma.transaction.findFirst({
+      where:   { id, userId },
       include: transactionInclude,
     })
     if (!transaction) throw new Error('Transação não encontrada.')
     return transaction
   }
 
-  async update(id: string, data: UpdateTransactionInput) {
-    const existing = await prisma.transaction.findUnique({ where: { id } })
+  async update(userId: string, id: string, data: UpdateTransactionInput) {
+    const existing = await prisma.transaction.findFirst({ where: { id, userId } })
     if (!existing) throw new Error('Transação não encontrada.')
 
-    // Validação de FK + update em bloco atômico.
     const transaction = await prisma.$transaction(async (tx) => {
       if (data.accountId) {
-        const account = await tx.account.findUnique({ where: { id: data.accountId } })
+        const account = await tx.account.findFirst({ where: { id: data.accountId, userId } })
         if (!account) throw new Error('Conta não encontrada.')
       }
-
       if (data.assetId) {
         const asset = await tx.asset.findUnique({ where: { id: data.assetId } })
         if (!asset) throw new Error('Ativo não encontrado.')
       }
-
       return tx.transaction.update({
         where: { id },
         data: {
@@ -163,9 +152,7 @@ class TransactionsService {
           settlementDate:   data.settlementDate   !== undefined ? data.settlementDate   : undefined,
           quantity:         data.quantity         !== undefined ? toDecimal(data.quantity)    : undefined,
           unitPrice:        data.unitPrice        !== undefined ? toDecimal(data.unitPrice)   : undefined,
-          grossAmount:      data.grossAmount      !== undefined
-                              ? new Prisma.Decimal(data.grossAmount as string | number | Prisma.Decimal)
-                              : undefined,
+          grossAmount:      data.grossAmount      !== undefined ? new Prisma.Decimal(data.grossAmount as string | number | Prisma.Decimal) : undefined,
           fees:             data.fees             !== undefined ? toDecimal(data.fees)         : undefined,
           taxes:            data.taxes            !== undefined ? toDecimal(data.taxes)        : undefined,
           netAmount:        data.netAmount        !== undefined ? toDecimal(data.netAmount)    : undefined,
@@ -181,19 +168,18 @@ class TransactionsService {
       })
     })
 
-    triggerSnapshotRegen(existing.tradeDate)
+    triggerSnapshotRegen(userId, existing.tradeDate)
     if (data.tradeDate && data.tradeDate.getTime() !== existing.tradeDate.getTime()) {
-      triggerSnapshotRegen(data.tradeDate)
+      triggerSnapshotRegen(userId, data.tradeDate)
     }
-
     return transaction
   }
 
-  async remove(id: string) {
-    const existing = await prisma.transaction.findUnique({ where: { id } })
+  async remove(userId: string, id: string) {
+    const existing = await prisma.transaction.findFirst({ where: { id, userId } })
     if (!existing) throw new Error('Transação não encontrada.')
     await prisma.transaction.delete({ where: { id } })
-    triggerSnapshotRegen(existing.tradeDate)
+    triggerSnapshotRegen(userId, existing.tradeDate)
   }
 }
 
