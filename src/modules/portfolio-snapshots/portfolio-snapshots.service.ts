@@ -83,10 +83,12 @@ export type SnapshotPeriodType = 'DAILY' | 'WEEKLY';
  * Gera (ou atualiza) um snapshot para a data de referência informada.
  *
  * Para WEEKLY: usa a sexta-feira da semana e aceita o preço mais recente
- *              disponível até o fim daquele dia (comportamento original).
- * Para DAILY:  usa a data exata e exige que exista closePrice para aquele
- *              dia. Se não houver preço para nenhum ativo (feriado/fim de
- *              semana), retorna null — o cron deve pular silenciosamente.
+ *              disponível até o fim daquele dia.
+ * Para DAILY:  usa a data exata. Se um ativo não tiver preço disponível
+ *              para aquele dia, usa investedAmount como marketValue
+ *              (sem distorção nos totais). O snapshot é SEMPRE gerado
+ *              enquanto houver pelo menos um ativo com posição aberta.
+ *              Retorna null apenas se não houver nenhum ativo com posição.
  */
 export async function generateSnapshot(
   referenceDate: Date,
@@ -95,15 +97,6 @@ export async function generateSnapshot(
   const anchor     = period === 'WEEKLY' ? toFriday(referenceDate) : toMidnightUTC(referenceDate);
   const anchorEnd  = new Date(anchor);
   anchorEnd.setUTCHours(23, 59, 59, 999);
-
-  // Para DAILY: verifica se há ao menos um preço de fechamento nessa data.
-  // Se não houver (feriado, fim de semana), retorna null → pula.
-  if (period === 'DAILY') {
-    const priceCount = await prisma.priceHistory.count({
-      where: { priceDate: { gte: anchor, lte: anchorEnd } },
-    });
-    if (priceCount === 0) return null;
-  }
 
   const assetClasses = await prisma.assetClass.findMany({
     where:   { isActive: true },
@@ -117,6 +110,9 @@ export async function generateSnapshot(
     },
     include: { assetClass: true },
   });
+
+  // Sem ativos com transações até essa data → nada a gerar
+  if (assets.length === 0) return null;
 
   let totalInvested    = 0;
   let totalMarketValue = 0;
@@ -154,17 +150,17 @@ export async function generateSnapshot(
     const averagePrice   = totalCost / quantity;
     const investedAmount = quantity * averagePrice;
 
-    // Para DAILY: busca o preço exato do dia; sem preço → usa investedAmount (sem distorção).
-    // Para WEEKLY: busca o preço mais recente até o fim da sexta (comportamento original).
-    const priceQuery = period === 'DAILY'
-      ? { assetId: asset.id, priceDate: { gte: anchor, lte: anchorEnd } }
-      : { assetId: asset.id, priceDate: { lte: anchorEnd } };
-
+    // Busca o preço mais recente disponível até o fim do dia âncora.
+    // Para DAILY: tenta o dia exato primeiro; se não encontrar, usa o
+    // último preço disponível (evita que ativos de renda fixa ou sem
+    // cotação diária fiquem sem valor de mercado).
     const priceRow = await prisma.priceHistory.findFirst({
-      where:   priceQuery,
+      where:   { assetId: asset.id, priceDate: { lte: anchorEnd } },
       orderBy: { priceDate: 'desc' },
     });
     const marketPrice = priceRow ? toNum(priceRow.closePrice) : null;
+
+    // Sem preço disponível → usa investedAmount como proxy (sem distorção)
     const marketValue = marketPrice !== null ? quantity * marketPrice : investedAmount;
     const profitLoss  = marketValue - investedAmount;
 
@@ -201,6 +197,9 @@ export async function generateSnapshot(
     cls.marketValue += marketValue;
     byClass.set(asset.assetClassId, cls);
   }
+
+  // Todos os ativos foram zerados (posição = 0) → nada a persistir
+  if (assetSnapshots.length === 0) return null;
 
   const totalProfitLoss    = totalMarketValue - totalInvested;
   const totalProfitLossPct = totalInvested > 0 ? totalProfitLoss / totalInvested : 0;
@@ -272,7 +271,6 @@ export async function generateSnapshotRange(
     try {
       const snap = await generateSnapshot(date, period);
       if (snap !== null) results.push(snap);
-      // snap === null significa feriado (DAILY sem preços) → pula silenciosamente
     } catch (err) {
       errors.push({ date: date.toISOString().slice(0, 10), error: (err as Error).message });
     }
