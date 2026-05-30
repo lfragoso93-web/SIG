@@ -79,17 +79,6 @@ function calcPosition(txs: { type: string; quantity: unknown; unitPrice: unknown
 
 export type SnapshotPeriodType = 'DAILY' | 'WEEKLY';
 
-/**
- * Gera (ou atualiza) um snapshot para a data de referência informada.
- *
- * Para WEEKLY: usa a sexta-feira da semana e aceita o preço mais recente
- *              disponível até o fim daquele dia.
- * Para DAILY:  usa a data exata. Se um ativo não tiver preço disponível
- *              para aquele dia, usa investedAmount como marketValue
- *              (sem distorção nos totais). O snapshot é SEMPRE gerado
- *              enquanto houver pelo menos um ativo com posição aberta.
- *              Retorna null apenas se não houver nenhum ativo com posição.
- */
 export async function generateSnapshot(
   referenceDate: Date,
   period: SnapshotPeriodType = 'WEEKLY',
@@ -111,7 +100,6 @@ export async function generateSnapshot(
     include: { assetClass: true },
   });
 
-  // Sem ativos com transações até essa data → nada a gerar
   if (assets.length === 0) return null;
 
   let totalInvested    = 0;
@@ -150,17 +138,11 @@ export async function generateSnapshot(
     const averagePrice   = totalCost / quantity;
     const investedAmount = quantity * averagePrice;
 
-    // Busca o preço mais recente disponível até o fim do dia âncora.
-    // Para DAILY: tenta o dia exato primeiro; se não encontrar, usa o
-    // último preço disponível (evita que ativos de renda fixa ou sem
-    // cotação diária fiquem sem valor de mercado).
     const priceRow = await prisma.priceHistory.findFirst({
       where:   { assetId: asset.id, priceDate: { lte: anchorEnd } },
       orderBy: { priceDate: 'desc' },
     });
     const marketPrice = priceRow ? toNum(priceRow.closePrice) : null;
-
-    // Sem preço disponível → usa investedAmount como proxy (sem distorção)
     const marketValue = marketPrice !== null ? quantity * marketPrice : investedAmount;
     const profitLoss  = marketValue - investedAmount;
 
@@ -198,7 +180,6 @@ export async function generateSnapshot(
     byClass.set(asset.assetClassId, cls);
   }
 
-  // Todos os ativos foram zerados (posição = 0) → nada a persistir
   if (assetSnapshots.length === 0) return null;
 
   const totalProfitLoss    = totalMarketValue - totalInvested;
@@ -264,19 +245,24 @@ export async function generateSnapshotRange(
     ? fridaysBetween(startDate, endDate)
     : weekdaysBetween(startDate, endDate);
 
-  const results: object[] = [];
-  const errors:  object[] = [];
+  let generated = 0;
+  let skipped   = 0;
+  const errors: { date: string; error: string }[] = [];
 
   for (const date of dates) {
     try {
       const snap = await generateSnapshot(date, period);
-      if (snap !== null) results.push(snap);
+      if (snap !== null) {
+        generated++;
+      } else {
+        skipped++;
+      }
     } catch (err) {
       errors.push({ date: date.toISOString().slice(0, 10), error: (err as Error).message });
     }
   }
 
-  return { generated: results.length, errors, snapshots: results };
+  return { generated, skipped, errors: errors.length, errorDetails: errors };
 }
 
 export async function listSnapshots(from?: Date, to?: Date, period: SnapshotPeriodType = 'WEEKLY') {

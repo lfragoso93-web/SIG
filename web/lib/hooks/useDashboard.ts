@@ -1,72 +1,92 @@
-'use client'
-
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import type {
-  PortfolioSnapshot,
-  AllocationItem,
-  PerformanceData,
-  DividendSummary,
-} from '@/lib/api'
 
-// Últimos N snapshots DAILY ordenados por data
-export function useSnapshots(limit = 90) {
-  return useQuery<PortfolioSnapshot[]>({
-    queryKey: ['snapshots', limit],
-    queryFn: async () => {
-      const res = await api.get<PortfolioSnapshot[]>('/portfolio-snapshots', {
-        params: { period: 'DAILY', limit, orderBy: 'snapshotDate', order: 'asc' },
+// ── Tipos ─────────────────────────────────────────────────────────────────────
+
+export interface SnapshotSummary {
+  referenceDate:      string
+  period:             string
+  totalValue:         number
+  totalInvested:      number
+  unrealizedPnL:      number
+  unrealizedPnLPct:   number
+  snapshotDate:       string
+}
+
+export interface AllocationItem {
+  assetClassCode:    string
+  assetClassName:    string
+  currentValue:      number
+  currentPercent:    number
+  targetPercent:     number | null
+  rebalanceDiff:     number | null
+}
+
+export interface PerformanceSummary {
+  totalInvested:   number
+  totalMarketValue: number
+  absoluteReturn:  number
+  percentReturn:   number
+}
+
+export interface DividendSummary {
+  totalYear:    number
+  avgPerMonth:  number
+}
+
+// ── Hooks de leitura ──────────────────────────────────────────────────────────
+
+export function useSnapshots(days = 90) {
+  return useQuery({
+    queryKey: ['snapshots', days],
+    queryFn:  async () => {
+      const from = new Date()
+      from.setDate(from.getDate() - days)
+      const res = await api.get('/portfolio-snapshots', {
+        params: { from: from.toISOString().slice(0, 10), period: 'DAILY' },
       })
-      return res.data
+      return res.data as SnapshotSummary[]
     },
-    staleTime: 5 * 60 * 1000,
   })
 }
 
-// Alocação atual por classe — endpoint: POST /allocation/calculate
 export function useAllocation() {
-  return useQuery<AllocationItem[]>({
+  return useQuery({
     queryKey: ['allocation'],
-    queryFn: async () => {
-      const res = await api.post<AllocationItem[]>('/allocation/calculate')
-      return res.data
+    queryFn:  async () => {
+      const res = await api.get('/portfolio/allocation')
+      return res.data as AllocationItem[]
     },
-    staleTime: 5 * 60 * 1000,
   })
 }
 
-// Performance geral da carteira — endpoint: GET /performance/summary
 export function usePerformance() {
-  return useQuery<PerformanceData>({
+  return useQuery({
     queryKey: ['performance'],
-    queryFn: async () => {
-      const res = await api.get<PerformanceData>('/performance/summary')
-      return res.data
+    queryFn:  async () => {
+      const res = await api.get('/portfolio/performance')
+      return res.data as PerformanceSummary
     },
-    staleTime: 5 * 60 * 1000,
   })
 }
 
-// Proventos recebidos — endpoint: GET /dividends/summary
-export function useDividends(year?: number) {
-  return useQuery<DividendSummary>({
-    queryKey: ['dividends', year],
-    queryFn: async () => {
-      const res = await api.get<DividendSummary>('/dividends/summary', {
-        params: year ? { year } : {},
-      })
-      return res.data
+export function useDividends() {
+  return useQuery({
+    queryKey: ['dividends-summary'],
+    queryFn:  async () => {
+      const res = await api.get('/income-events/summary')
+      return res.data as DividendSummary
     },
-    staleTime: 5 * 60 * 1000,
   })
 }
 
-// Gerar snapshots para um range de datas
+// ── Gerar snapshots para um range de datas ────────────────────────────────────
+
 export function useGenerateSnapshotRange() {
   return useMutation({
     mutationFn: async (payload: { startDate: string; endDate: string; period?: string }) => {
       const res = await api.post('/portfolio-snapshots/generate-range', payload)
-      return res.data as { generated: number; skipped: number; errors: number }
+      return res.data as { generated: number; skipped: number; errors: number; errorDetails?: { date: string; error: string }[] }
     },
   })
 }
