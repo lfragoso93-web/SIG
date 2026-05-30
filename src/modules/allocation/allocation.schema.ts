@@ -19,7 +19,7 @@ const parseIsoDateOnlyToUtcDate = (value: unknown) => {
 }
 
 const parseRequiredDecimal = (value: unknown) => {
-  if (value === undefined || value === null || value === '') return value
+  if (value === undefined || value === null || value === '') return undefined
   if (typeof value === 'number') return value
   if (typeof value === 'string') {
     const normalized = value.replace(',', '.').trim()
@@ -38,9 +38,11 @@ export const allocationQuerySchema = z.object({
 })
 
 export const allocationBodySchema = z.object({
+  // Opcional — default 0. Usado pela página de Alocação para simular
+  // aportes; o dashboard chama sem esse campo.
   monthlyContribution: z.preprocess(
     parseRequiredDecimal,
-    z.number().positive('monthlyContribution deve ser maior que zero')
+    z.number().nonnegative('monthlyContribution deve ser maior ou igual a zero').optional().default(0)
   ),
 })
 
@@ -50,5 +52,5 @@ export const allocationInputSchema = z.object({
 })
 
 export type AllocationQueryInput = z.infer<typeof allocationQuerySchema>
-export type AllocationBodyInput = z.infer<typeof allocationBodySchema>
-export type AllocationInput = z.infer<typeof allocationInputSchema>
+export type AllocationBodyInput  = z.infer<typeof allocationBodySchema>
+export type AllocationInput      = z.infer<typeof allocationInputSchema>
