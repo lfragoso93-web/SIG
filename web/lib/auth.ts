@@ -3,21 +3,17 @@ import { api } from './api'
 /**
  * Autenticação via cookie HttpOnly.
  *
- * O token NÃO é mais armazenado em localStorage — isso elimina a exposição
- * a ataques XSS. A API emite o cookie `sig_token` com as flags:
- *   - HttpOnly  → JS do browser não consegue ler
- *   - SameSite=Lax → protege contra CSRF
- *   - Secure    → HTTPS obrigatório em produção
+ * Com o proxy Next.js em /api/*, o login agora é same-origin:
+ * - O browser faz POST /api/auth/login
+ * - O proxy repassa para a API interna
+ * - A API responde com Set-Cookie: sig_token (HttpOnly, SameSite=Lax)
+ * - O browser aceita o cookie normalmente pois a origem é a mesma
  *
- * O Axios envia o cookie automaticamente em toda requisição via
- * `withCredentials: true` (configurado em api.ts).
- *
- * `isAuthenticated()` usa um cookie de sinalização NÃO-HttpOnly
- * (`sig_auth=1`) que o frontend pode ler apenas para saber se há
- * uma sessão ativa, sem expor o token em si.
+ * `sig_auth` é um cookie não-HttpOnly que o middleware Next.js
+ * consegue ler para validar a sessão sem expor o JWT.
  */
 
-const AUTH_FLAG_KEY = 'sig_auth' // cookie legível pelo JS (não contém o token)
+const AUTH_FLAG_KEY = 'sig_auth'
 
 function setAuthFlag(hours = 8) {
   if (typeof document === 'undefined') return
@@ -36,9 +32,6 @@ function readCookie(name: string): string | null {
   return match ? decodeURIComponent(match[1]) : null
 }
 
-/**
- * Dispara snapshot de hoje de forma silenciosa (fire-and-forget).
- */
 async function triggerTodaySnapshot(): Promise<void> {
   try {
     await api.post('/portfolio-snapshots/generate', { period: 'DAILY' })
@@ -50,8 +43,6 @@ async function triggerTodaySnapshot(): Promise<void> {
 
 export const authService = {
   async login(username: string, password: string): Promise<void> {
-    // A API define o cookie HttpOnly `sig_token` automaticamente na resposta.
-    // O frontend não precisa (nem consegue) ler o token.
     await api.post('/auth/login', { username, password })
     setAuthFlag(8)
     triggerTodaySnapshot()
@@ -59,10 +50,9 @@ export const authService = {
 
   async logout(): Promise<void> {
     try {
-      // Pede à API para limpar o cookie HttpOnly no servidor
       await api.post('/auth/logout')
     } catch {
-      // Silencioso — mesmo que a API falhe, limpamos o flag local
+      // silencioso
     } finally {
       clearAuthFlag()
       if (typeof window !== 'undefined') {
@@ -71,10 +61,6 @@ export const authService = {
     }
   },
 
-  /**
-   * Verifica existência da sessão pelo cookie de sinalização.
-   * Não expõe o token JWT em si.
-   */
   isAuthenticated(): boolean {
     return readCookie(AUTH_FLAG_KEY) === '1'
   },

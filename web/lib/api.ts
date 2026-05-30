@@ -1,26 +1,28 @@
 import axios from 'axios'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
+// Em todos os ambientes o browser chama /api/* que é reescrito
+// pelo proxy Next.js para a API interna. Isso garante mesma origem
+// e elimina qualquer problema de CORS / SameSite em mobile.
+const API_BASE = '/api'
 
 export const api = axios.create({
-  baseURL: API_URL,
+  baseURL: API_BASE,
   timeout: 15_000,
   headers: { 'Content-Type': 'application/json' },
-  // Envia cookies (incluindo o HttpOnly sig_token) em toda requisição.
-  // Requer que a API tenha CORS com credentials habilitado.
+  // withCredentials ainda verdadeiro para garantir envio de cookies
+  // mesmo em requisições AJAX (fá embora agora sejam same-origin).
   withCredentials: true,
 })
-
-// Não há mais interceptor de request para injetar Bearer token —
-// o cookie HttpOnly é enviado automaticamente pelo browser.
 
 api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401 && typeof window !== 'undefined') {
-      // Limpa o cookie de sinalização e redireciona para login
       document.cookie = 'sig_auth=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT'
-      window.location.href = '/login'
+      // Evita loop infinito se já estiver na página de login
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(err)
   },
