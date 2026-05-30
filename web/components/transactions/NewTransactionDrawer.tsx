@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   X, CheckCircle2, Loader2, AlertCircle, Sparkles,
-  TrendingUp, TrendingDown, Search,
+  TrendingUp, TrendingDown, Search, ChevronDown,
 } from 'lucide-react'
 import { fmt } from '@/lib/utils'
 import { api } from '@/lib/api'
@@ -100,6 +100,131 @@ function Highlight({ text, query }: { text: string; query: string }) {
       </mark>
       {text.slice(idx + query.length)}
     </>
+  )
+}
+
+// ── ClassDropdown (customizado, sem select nativo) ───────────────────────────
+function ClassDropdown({
+  value, onChange, classes, inputBase, labelClass, showSuggested,
+}: {
+  value: string
+  onChange: (id: string) => void
+  classes: AssetClass[]
+  inputBase: string
+  labelClass: string
+  showSuggested?: boolean
+}) {
+  const [open, setOpen]       = useState(false)
+  const [activeIdx, setActiveIdx] = useState(-1)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const listRef      = useRef<HTMLUListElement>(null)
+
+  const selected = classes.find((c) => c.id === value)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node))
+        setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    if (open && value) {
+      const idx = classes.findIndex((c) => c.id === value)
+      setActiveIdx(idx)
+    }
+  }, [open, value, classes])
+
+  useEffect(() => {
+    if (activeIdx >= 0 && listRef.current) {
+      const el = listRef.current.children[activeIdx] as HTMLElement | undefined
+      el?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [activeIdx])
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLButtonElement>) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (!open) { setOpen(true); return }
+      setActiveIdx(i => Math.min(i + 1, classes.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setActiveIdx(i => Math.max(i - 1, 0))
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      if (!open) { setOpen(true); return }
+      if (activeIdx >= 0 && classes[activeIdx]) {
+        onChange(classes[activeIdx].id)
+        setOpen(false)
+      }
+    } else if (e.key === 'Escape') {
+      setOpen(false)
+    }
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <label className={labelClass}>
+        Classe de ativo
+        {showSuggested && (
+          <span className="ml-1.5 text-[var(--color-primary)] font-normal opacity-70">(sugerida)</span>
+        )}
+      </label>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        onKeyDown={handleKeyDown}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={`${inputBase} flex items-center justify-between text-left`}
+      >
+        <span className={selected ? 'text-[var(--color-text)]' : 'text-[var(--color-text-faint)]'}>
+          {selected ? selected.name : 'Selecione a classe'}
+        </span>
+        <ChevronDown
+          size={14}
+          className={`flex-shrink-0 text-[var(--color-text-muted)] transition-transform duration-150 ${
+            open ? 'rotate-180' : ''
+          }`}
+        />
+      </button>
+
+      {open && (
+        <ul
+          ref={listRef}
+          role="listbox"
+          className="absolute z-50 left-0 right-0 mt-1.5 max-h-56 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[0_8px_24px_oklch(0_0_0/0.4)] divide-y divide-[var(--color-border-subtle)]"
+        >
+          {classes.map((c, i) => (
+            <li
+              key={c.id}
+              role="option"
+              aria-selected={c.id === value}
+              onMouseEnter={() => setActiveIdx(i)}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                onChange(c.id)
+                setOpen(false)
+              }}
+              className={`
+                px-3.5 py-2.5 cursor-pointer text-sm transition-colors
+                ${
+                  c.id === value
+                    ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary)] font-medium'
+                    : i === activeIdx
+                      ? 'bg-[var(--color-surface-offset)] text-[var(--color-text)]'
+                      : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-offset)] hover:text-[var(--color-text)]'
+                }
+              `}
+            >
+              {c.name}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -249,55 +374,6 @@ function AssetCombobox({
   )
 }
 
-// ── ClassSelect (reutilizável) ─────────────────────────────────────────────────────
-function ClassSelect({
-  value, onChange, classes, selectClass, labelClass, showSuggested,
-}: {
-  value: string
-  onChange: (v: string) => void
-  classes: AssetClass[]
-  selectClass: string
-  labelClass: string
-  showSuggested?: boolean
-}) {
-  return (
-    <div>
-      <label className={labelClass}>
-        Classe de ativo
-        {showSuggested && (
-          <span className="ml-1.5 text-[var(--color-primary)] font-normal opacity-70">(sugerida)</span>
-        )}
-      </label>
-      <div className="relative">
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          style={{
-            colorScheme: 'dark',
-            color: 'var(--color-text)',
-            backgroundColor: 'var(--color-surface-offset)',
-          }}
-          className={selectClass}
-        >
-          <option value="" style={{ color: 'var(--color-text-faint)', backgroundColor: 'var(--color-surface-offset)' }}>
-            Selecione a classe
-          </option>
-          {classes.map((c) => (
-            <option key={c.id} value={c.id} style={{ color: 'var(--color-text)', backgroundColor: 'var(--color-surface-offset)' }}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </span>
-      </div>
-    </div>
-  )
-}
-
 // ── Drawer principal ──────────────────────────────────────────────────────────
 export function NewTransactionDrawer({ open, onClose }: Props) {
   const [txType, setTxType] = useState<'BUY' | 'SELL'>('BUY')
@@ -338,7 +414,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     (a, b) => a.displayOrder - b.displayOrder,
   )
 
-  // Reset ao fechar
   useEffect(() => {
     if (!open) {
       setTimeout(() => {
@@ -353,7 +428,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     }
   }, [open])
 
-  /** Seleciona ativo local — preenche classe automaticamente */
   const handleSelectLocalAsset = useCallback((asset: Asset) => {
     setTickerInput(asset.ticker)
     setSearchedTicker(asset.ticker)
@@ -361,11 +435,9 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     setSearchDone(true)
     setBackendQuote(null)
     setNewAssetName('')
-    // Preenche classe com a do ativo selecionado
     setSelectedClassId(asset.assetClassId ?? asset.assetClass?.id ?? '')
   }, [])
 
-  /** Busca remota — tenta banco direto, depois quote do mercado */
   const handleTriggerRemoteSearch = useCallback(async (ticker: string) => {
     setSearchedTicker(ticker)
     setTickerInput(ticker)
@@ -405,7 +477,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     if (!searchedTicker || !searchDone || searchLoading) return false
     if (!resolvedAsset && !isNewAsset) return false
     if (isNewAsset && newAssetName.trim().length === 0) return false
-    if (!selectedClassId) return false  // obrigatório sempre
+    if (!selectedClassId) return false
     if (!tradeDate || parseFloat(quantity) <= 0 || parseFloat(unitPrice) <= 0) return false
     return true
   }
@@ -455,13 +527,11 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
     'transition-all duration-150',
   ].join(' ')
 
-  const selectClass = `${inputBase} appearance-none`
-  const labelClass  = 'block text-xs font-medium text-[var(--color-text-muted)] mb-1.5'
+  const labelClass = 'block text-xs font-medium text-[var(--color-text-muted)] mb-1.5'
   const isBuy = txType === 'BUY'
 
   return (
     <>
-      {/* Overlay */}
       <div
         className={`fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] transition-opacity duration-200 ${
           open ? 'opacity-100' : 'opacity-0 pointer-events-none'
@@ -469,7 +539,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
         onClick={onClose}
       />
 
-      {/* Drawer */}
       <div className={`
         fixed bottom-0 left-0 right-0 z-50
         sm:left-auto sm:right-4 sm:bottom-4 sm:w-[420px]
@@ -481,7 +550,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
         ${open ? 'translate-y-0' : 'translate-y-full sm:translate-y-[calc(100%+2rem)]'}
       `}>
 
-        {/* Header fixo */}
+        {/* Header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-4 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
@@ -502,10 +571,10 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
 
         <div className="h-px bg-[var(--color-border)] mx-5 flex-shrink-0" />
 
-        {/* Corpo com scroll */}
+        {/* Corpo */}
         <div className="overflow-y-auto flex-1 px-5 py-5 space-y-5">
 
-          {/* Tipo de operação */}
+          {/* Tipo */}
           <div>
             <label className={labelClass}>Tipo de operação</label>
             <div className="grid grid-cols-2 gap-2">
@@ -533,17 +602,17 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
             </div>
           </div>
 
-          {/* Classe de ativo — sempre visível */}
-          <ClassSelect
+          {/* Classe — sempre visível, dropdown customizado */}
+          <ClassDropdown
             value={selectedClassId}
             onChange={setSelectedClassId}
             classes={sortedClasses}
-            selectClass={selectClass}
+            inputBase={inputBase}
             labelClass={labelClass}
             showSuggested={!!(selectedClassId && backendQuote?.inferredClass)}
           />
 
-          {/* Ativo — combobox */}
+          {/* Ativo */}
           <div>
             <label className={labelClass}>Ativo</label>
             <AssetCombobox
@@ -585,7 +654,6 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
               </div>
             )}
 
-            {/* Ativo novo: nome + aviso */}
             {isNewAsset && !searchLoading && (
               <div className="mt-3 space-y-3">
                 <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${
@@ -686,7 +754,7 @@ export function NewTransactionDrawer({ open, onClose }: Props) {
           )}
         </div>
 
-        {/* Footer fixo */}
+        {/* Footer */}
         <div className="flex-shrink-0">
           <div className="h-px bg-[var(--color-border)] mx-5" />
           <div className="px-5 py-4">
