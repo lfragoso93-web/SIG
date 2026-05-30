@@ -6,4 +6,5 @@ const router = Router()
 router.post('/login',  (req, res, next) => authController.post(req, res, next))
 router.post('/logout', (req, res, next) => authController.logout(req, res, next))
 
-export default router
+// Named export para compatibilidade com o index.ts
+export const authRouter = router
